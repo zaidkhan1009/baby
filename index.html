@@ -458,15 +458,21 @@
     .stat-row { grid-template-columns: repeat(2,1fr); }
   }
 
-  /* Tooltip */
+  /* Tooltip — default: below */
   [data-tip] { position: relative; }
   [data-tip]:hover::after {
     content: attr(data-tip);
-    position: absolute; bottom: calc(100% + 8px); left: 50%;
+    position: absolute; top: calc(100% + 8px); left: 50%;
     transform: translateX(-50%);
     background: var(--surface2); color: var(--text); font-size: 11px;
     padding: 4px 10px; border-radius: 6px; white-space: nowrap;
     pointer-events: none; z-index: 999;
+  }
+  /* Sidebar nav tooltips — show to the right */
+  .sidebar:not(.expanded) .nav-item[data-tip]:hover::after,
+  .sidebar:not(.expanded) .toggle-sidebar[data-tip]:hover::after {
+    top: 50%; left: calc(100% + 12px);
+    transform: translateY(-50%);
   }
 
   /* Glow effect on accent elements */
@@ -552,28 +558,28 @@
   <!-- SIDEBAR (desktop) -->
   <div class="sidebar" id="sidebar">
     <div class="logo">N</div>
-    <div class="nav-item active" onclick="navigate('dashboard')" data-page="dashboard">
+    <div class="nav-item active" onclick="navigate('dashboard')" data-page="dashboard" data-tip="Dashboard">
       <span>⬡</span><span class="nav-label">Dashboard</span>
     </div>
-    <div class="nav-item" onclick="navigate('chat')" data-page="chat">
+    <div class="nav-item" onclick="navigate('chat')" data-page="chat" data-tip="AI Chat">
       <span>◎</span><span class="nav-label">AI Chat</span>
     </div>
-    <div class="nav-item" onclick="navigate('ventures')" data-page="ventures">
+    <div class="nav-item" onclick="navigate('ventures')" data-page="ventures" data-tip="Ventures">
       <span>◈</span><span class="nav-label">Ventures</span>
     </div>
-    <div class="nav-item" onclick="navigate('tasks')" data-page="tasks">
+    <div class="nav-item" onclick="navigate('tasks')" data-page="tasks" data-tip="Tasks">
       <span>◻</span><span class="nav-label">Tasks</span>
     </div>
-    <div class="nav-item" onclick="navigate('decisions')" data-page="decisions">
+    <div class="nav-item" onclick="navigate('decisions')" data-page="decisions" data-tip="Decisions">
       <span>◉</span><span class="nav-label">Decisions</span>
     </div>
-    <div class="nav-item" onclick="navigate('memory')" data-page="memory">
+    <div class="nav-item" onclick="navigate('memory')" data-page="memory" data-tip="Memory">
       <span>◆</span><span class="nav-label">Memory</span>
     </div>
-    <div class="nav-item" onclick="navigate('insights')" data-page="insights">
+    <div class="nav-item" onclick="navigate('insights')" data-page="insights" data-tip="Insights">
       <span>◐</span><span class="nav-label">Insights</span>
     </div>
-    <div class="toggle-sidebar" onclick="toggleSidebar()">
+    <div class="toggle-sidebar" onclick="toggleSidebar()" data-tip="Expand">
       <span id="toggle-icon">▶</span>
       <span class="nav-label" id="toggle-label">Expand</span>
     </div>
@@ -838,16 +844,16 @@ function save() {
 }
 
 async function cloudSave() {
-  if (!syncConfig.binId || !syncConfig.apiKey) return;
   if (isSyncing) return;
   isSyncing = true;
   setSyncStatus('saving');
   try {
-    await fetch(`https://api.jsonbin.io/v3/b/${syncConfig.binId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-Master-Key': syncConfig.apiKey },
+    const res = await fetch(`${NEXUS_WORKER_URL}/state`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(state)
     });
+    if (!res.ok) throw new Error();
     setSyncStatus('saved');
   } catch (e) {
     setSyncStatus('error');
@@ -856,16 +862,13 @@ async function cloudSave() {
 }
 
 async function cloudLoad() {
-  if (!syncConfig.binId || !syncConfig.apiKey) return false;
   setSyncStatus('loading');
   try {
-    const res = await fetch(`https://api.jsonbin.io/v3/b/${syncConfig.binId}/latest`, {
-      headers: { 'X-Master-Key': syncConfig.apiKey }
-    });
-    if (!res.ok) throw new Error('Bad response');
-    const data = await res.json();
-    if (data.record) {
-      state = data.record;
+    const res = await fetch(`${NEXUS_WORKER_URL}/state`);
+    if (!res.ok) throw new Error();
+    const { data } = await res.json();
+    if (data && typeof data === 'object' && data.ventures) {
+      state = { ...defaultState(), ...data };
       localStorage.setItem(KEY, JSON.stringify(state));
       setSyncStatus('synced');
       return true;
@@ -1331,19 +1334,27 @@ const SUGGESTIONS_POOL = [
   'Biggest risk in my ventures right now?',
 ];
 
-function renderSuggestions() {
+async function renderSuggestions() {
   const suggs = SUGGESTIONS_POOL.sort(() => Math.random() - 0.5).slice(0, 4);
   document.getElementById('suggestions').innerHTML = suggs.map(s =>
     `<div class="suggestion-chip" onclick="askSuggestion('${s}')">${s}</div>`).join('');
 
-  // Render existing chat (clear first to avoid duplicates on re-navigate)
+  // Load chat history from Supabase via Worker
   const container = document.getElementById('chat-messages');
-  container.innerHTML = '';
-  if (state.chatHistory.length === 0) {
-    appendMessage('ai', `Hello Umar! 👋 I'm NEXUS — your personal AI command centre. I know about your Cloud Kitchen, Café search, and Poultry plans. I'm fully context-aware and get smarter the more you interact with me.\n\nWhat would you like to work on today?`);
-  } else {
-    state.chatHistory.forEach(m => appendMessage(m.role, m.content, false));
-    scrollChat();
+  container.innerHTML = '<div style="text-align:center;color:var(--text3);font-size:12px;padding:20px">Loading history...</div>';
+  try {
+    const res = await fetch(`${NEXUS_WORKER_URL}/history`);
+    const { messages } = await res.json();
+    container.innerHTML = '';
+    if (messages?.length) {
+      messages.forEach(m => appendMessage(m.role === 'assistant' ? 'ai' : 'user', m.content, false));
+      scrollChat();
+    } else {
+      appendMessage('ai', `Hello Umar! I'm NEXUS — your personal AI command centre. I know about your Cloud Kitchen, Café search, and Poultry plans. I'm fully context-aware and get smarter the more we talk.\n\nWhat would you like to work on today?`);
+    }
+  } catch (e) {
+    container.innerHTML = '';
+    appendMessage('ai', `Hello Umar! I'm NEXUS. (Memory offline — responses will work but history won't persist.)\n\nWhat would you like to work on today?`);
   }
 }
 
@@ -1379,7 +1390,6 @@ async function sendMessage() {
   input.value = '';
 
   appendMessage('user', text);
-  state.chatHistory.push({ role: 'user', content: text });
 
   // Typing indicator
   const container = document.getElementById('chat-messages');
@@ -1391,19 +1401,15 @@ async function sendMessage() {
   scrollChat();
 
   try {
-    const messages = state.chatHistory.map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.content }));
     const res = await fetch(`${NEXUS_WORKER_URL}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages, systemPrompt: buildSystemPrompt() })
+      body: JSON.stringify({ message: text, systemPrompt: buildSystemPrompt() })
     });
     const data = await res.json();
     const reply = data.text || 'Sorry, something went wrong.';
     document.getElementById('typing')?.remove();
     appendMessage('ai', reply);
-    state.chatHistory.push({ role: 'ai', content: reply });
-    if (state.chatHistory.length > 30) state.chatHistory = state.chatHistory.slice(-30);
-    save();
     renderSuggestions_chips();
   } catch (e) {
     document.getElementById('typing')?.remove();
@@ -1423,93 +1429,63 @@ function renderSuggestions_chips() {
 function showSetup() { document.getElementById('setup-modal').style.display = 'flex'; }
 function hideSetup() { document.getElementById('setup-modal').style.display = 'none'; }
 
-async function saveSetup() {
-  const apiKey = document.getElementById('setup-apikey').value.trim();
-  const binId = document.getElementById('setup-binid').value.trim();
-  const err = document.getElementById('setup-error');
-  const btn = document.getElementById('setup-btn');
-  err.textContent = '';
-  if (!apiKey) { err.textContent = 'Please enter your JSONBin Master Key.'; return; }
-
-  if (!binId) {
-    btn.textContent = 'Creating your bin...';
-    try {
-      const res = await fetch('https://api.jsonbin.io/v3/b', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Master-Key': apiKey, 'X-Bin-Name': 'nexus-umar', 'X-Bin-Private': 'true' },
-        body: JSON.stringify(state)
-      });
-      btn.textContent = 'Save & Connect';
-      if (!res.ok) { err.textContent = 'Invalid API key or connection error. Check and try again.'; return; }
-      const data = await res.json();
-      syncConfig = { apiKey, binId: data.metadata.id };
-      saveCfg();
-      document.getElementById('setup-binid-display').textContent = data.metadata.id;
-      document.getElementById('setup-binid-section').style.display = 'block';
-      setSyncStatus('saved');
-      setTimeout(() => { hideSetup(); renderAll(); }, 2000);
-    } catch(e) { err.textContent = 'Network error. Try again.'; btn.textContent = 'Save & Connect'; }
-  } else {
-    syncConfig = { apiKey, binId };
-    const ok = await cloudLoad();
-    if (ok) { saveCfg(); hideSetup(); renderAll(); }
-    else { err.textContent = 'Could not load data. Check your Bin ID and Key.'; syncConfig = {}; }
-  }
-}
-
 function renderAll() { renderDashboard(); updateVentureDropdowns(); }
+
+// ═══════════════════════════════════════════════
+// CLEAR HISTORY
+// ═══════════════════════════════════════════════
+async function clearChatHistory() {
+  if (!confirm('Clear all chat history? This cannot be undone.')) return;
+  try {
+    await fetch(`${NEXUS_WORKER_URL}/history/clear`, { method: 'POST' });
+  } catch (e) {}
+  hideSetup();
+  if (document.getElementById('page-chat')?.classList.contains('active')) renderSuggestions();
+}
 
 // ═══════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════
 async function init() {
-  if (syncConfig.binId && syncConfig.apiKey) {
-    setSyncStatus('loading');
-    const ok = await cloudLoad();
-    if (ok) { renderAll(); return; }
-  } else {
-    setSyncStatus('offline');
-  }
+  const ok = await cloudLoad();
+  if (!ok) setSyncStatus('offline');
   renderAll();
 }
 
 init();
 </script>
 
-<!-- SETUP MODAL -->
+<!-- NEXUS STATUS MODAL -->
 <div id="setup-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:9999;align-items:center;justify-content:center;padding:20px">
-  <div style="background:#0e0e1a;border:1px solid rgba(120,120,255,0.3);border-radius:14px;padding:32px;max-width:480px;width:100%;box-shadow:0 0 60px rgba(108,99,255,0.25)">
-    <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;margin-bottom:8px">☁️ Enable Cloud Sync</div>
-    <div style="font-size:13px;color:#9999bb;margin-bottom:24px;line-height:1.6">Your data will sync across all devices — phone, laptop, anywhere. Uses <strong style="color:#e8e8f0">JSONBin.io</strong> (free, private, takes 2 minutes).</div>
+  <div style="background:#0e0e1a;border:1px solid rgba(120,120,255,0.3);border-radius:14px;padding:32px;max-width:420px;width:100%;box-shadow:0 0 60px rgba(108,99,255,0.25)">
+    <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;margin-bottom:20px">✦ NEXUS Status</div>
 
-    <div style="background:#14141f;border:1px solid rgba(120,120,255,0.12);border-radius:10px;padding:16px;margin-bottom:20px;font-size:13px;line-height:2">
-      <div style="font-weight:600;margin-bottom:6px;color:#a78bfa">📋 Step-by-step</div>
-      <div>1. Go to <a href="https://jsonbin.io" target="_blank" style="color:#38bdf8">jsonbin.io</a> &rarr; Sign up free</div>
-      <div>2. Click your profile icon &rarr; <strong style="color:#e8e8f0">API Keys</strong></div>
-      <div>3. Copy your <strong style="color:#e8e8f0">Master Key</strong> and paste below</div>
-      <div>4. Leave Bin ID blank — I'll create it automatically ✅</div>
+    <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:24px">
+      <div style="background:#14141f;border:1px solid rgba(120,120,255,0.12);border-radius:10px;padding:14px;display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:13px;font-weight:600">AI Engine</div>
+          <div style="font-size:11px;color:#9999bb;margin-top:2px">Groq — Llama 3.3 70B</div>
+        </div>
+        <span style="color:#34d399;font-size:12px;font-family:'DM Mono',monospace">● ACTIVE</span>
+      </div>
+      <div style="background:#14141f;border:1px solid rgba(120,120,255,0.12);border-radius:10px;padding:14px;display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:13px;font-weight:600">Memory</div>
+          <div style="font-size:11px;color:#9999bb;margin-top:2px">Supabase — chat history + facts</div>
+        </div>
+        <span id="modal-mem-status" style="color:#34d399;font-size:12px;font-family:'DM Mono',monospace">● ACTIVE</span>
+      </div>
+      <div style="background:#14141f;border:1px solid rgba(120,120,255,0.12);border-radius:10px;padding:14px;display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:13px;font-weight:600">State Sync</div>
+          <div style="font-size:11px;color:#9999bb;margin-top:2px">Ventures, Tasks, Decisions</div>
+        </div>
+        <span id="modal-sync-status" style="color:#34d399;font-size:12px;font-family:'DM Mono',monospace">● ACTIVE</span>
+      </div>
     </div>
 
-    <div style="margin-bottom:14px">
-      <div style="font-size:12px;color:#9999bb;margin-bottom:6px">Master Key (from JSONBin.io)</div>
-      <input id="setup-apikey" style="width:100%;background:#14141f;border:1px solid rgba(120,120,255,0.2);border-radius:8px;padding:10px 14px;color:#e8e8f0;font-size:13px;outline:none" placeholder="$2a$10$..." type="password" />
-    </div>
-    <div style="margin-bottom:14px">
-      <div style="font-size:12px;color:#9999bb;margin-bottom:6px">Bin ID <span style="color:#5555aa">(leave blank for first-time — recommended)</span></div>
-      <input id="setup-binid" style="width:100%;background:#14141f;border:1px solid rgba(120,120,255,0.2);border-radius:8px;padding:10px 14px;color:#e8e8f0;font-size:13px;outline:none" placeholder="Leave blank to auto-create" />
-    </div>
-
-    <div id="setup-binid-section" style="display:none;background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.2);border-radius:8px;padding:14px;margin-bottom:14px;font-size:12px;line-height:1.8">
-      ✅ <strong>Bin created!</strong> Save this ID to reconnect on other devices:<br>
-      <strong id="setup-binid-display" style="color:#34d399;font-family:'DM Mono',monospace;word-break:break-all"></strong>
-    </div>
-
-    <div id="setup-error" style="color:#f87171;font-size:12px;margin-bottom:12px;min-height:16px"></div>
-
-    <div style="display:flex;gap:10px">
-      <button id="setup-btn" onclick="saveSetup()" style="flex:1;padding:11px;background:#6c63ff;color:white;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">Save &amp; Connect</button>
-      <button onclick="hideSetup()" style="padding:11px 20px;background:#1a1a2e;color:#9999bb;border:1px solid rgba(120,120,255,0.15);border-radius:8px;font-size:13px;cursor:pointer">Skip</button>
-    </div>
+    <button onclick="clearChatHistory()" style="width:100%;padding:10px;background:rgba(248,113,113,0.1);color:#f87171;border:1px solid rgba(248,113,113,0.2);border-radius:8px;font-size:13px;cursor:pointer;margin-bottom:10px">Clear Chat History</button>
+    <button onclick="hideSetup()" style="width:100%;padding:10px;background:#6c63ff;color:white;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">Close</button>
   </div>
 </div>
 

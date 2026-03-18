@@ -1336,7 +1336,9 @@ function renderSuggestions() {
   document.getElementById('suggestions').innerHTML = suggs.map(s =>
     `<div class="suggestion-chip" onclick="askSuggestion('${s}')">${s}</div>`).join('');
 
-  // Render existing chat
+  // Render existing chat (clear first to avoid duplicates on re-navigate)
+  const container = document.getElementById('chat-messages');
+  container.innerHTML = '';
   if (state.chatHistory.length === 0) {
     appendMessage('ai', `Hello Umar! 👋 I'm NEXUS — your personal AI command centre. I know about your Cloud Kitchen, Café search, and Poultry plans. I'm fully context-aware and get smarter the more you interact with me.\n\nWhat would you like to work on today?`);
   } else {

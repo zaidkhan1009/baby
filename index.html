@@ -475,6 +475,25 @@
     transform: translateY(-50%);
   }
 
+  /* ── TOOLS PAGE ── */
+  .tool-card {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px 20px;
+    display: flex; align-items: center; gap: 16px; transition: border-color 0.2s;
+  }
+  .tool-card:hover { border-color: var(--border2); }
+  .tool-icon { width: 38px; height: 38px; border-radius: 8px; background: rgba(108,99,255,0.15); display: flex; align-items: center; justify-content: center; font-size: 17px; flex-shrink: 0; }
+  .tool-name { font-size: 14px; font-weight: 600; }
+  .tool-desc { font-size: 12px; color: var(--text2); margin-top: 3px; line-height: 1.5; }
+  .tool-tag { font-size: 10px; padding: 2px 7px; border-radius: 4px; background: rgba(108,99,255,0.12); color: var(--accent2); font-family: var(--font-mono); margin-top: 5px; display: inline-block; }
+  /* Toggle switch */
+  .toggle { position: relative; width: 42px; height: 24px; flex-shrink: 0; }
+  .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .toggle-slider { position: absolute; inset: 0; background: var(--surface2); border-radius: 24px; cursor: pointer; transition: 0.25s; }
+  .toggle-slider:before { content: ''; position: absolute; width: 18px; height: 18px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: 0.25s; }
+  .toggle input:checked + .toggle-slider { background: var(--accent); }
+  .toggle input:checked + .toggle-slider:before { transform: translateX(18px); }
+
   /* Glow effect on accent elements */
   .glow { box-shadow: 0 0 20px rgba(108,99,255,0.3); }
 
@@ -578,6 +597,9 @@
     </div>
     <div class="nav-item" onclick="navigate('insights')" data-page="insights" data-tip="Insights">
       <span>◐</span><span class="nav-label">Insights</span>
+    </div>
+    <div class="nav-item" onclick="navigate('tools')" data-page="tools" data-tip="Tools">
+      <span>⚙</span><span class="nav-label">Tools</span>
     </div>
     <div class="toggle-sidebar" onclick="toggleSidebar()" data-tip="Expand">
       <span id="toggle-icon">▶</span>
@@ -767,6 +789,24 @@
         <div id="insights-list"></div>
       </div>
 
+      <!-- ══ TOOLS ══ -->
+      <div class="page" id="page-tools">
+        <div class="section-header">
+          <div class="section-title">Tools & Skills</div>
+          <button class="btn btn-primary btn-sm" onclick="renderTools()">↻ Refresh</button>
+        </div>
+        <p style="font-size:13px;color:var(--text2);margin-bottom:20px;line-height:1.6">
+          NEXUS automatically decides which tools to use during conversations. Toggle tools on or off — enabled tools are available in every chat.
+        </p>
+        <div id="tools-loading" class="empty-state" style="display:none">
+          <div class="typing-indicator" style="justify-content:center;margin-bottom:12px">
+            <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
+          </div>
+          Loading tools...
+        </div>
+        <div id="tools-list" style="display:flex;flex-direction:column;gap:10px"></div>
+      </div>
+
     </div><!-- /content -->
   </div><!-- /main -->
 </div><!-- /app -->
@@ -930,7 +970,7 @@ let state = load();
 // ═══════════════════════════════════════════════
 // NAVIGATION
 // ═══════════════════════════════════════════════
-const PAGE_TITLES = { dashboard:'Dashboard', chat:'AI Chat', ventures:'Ventures', tasks:'Tasks', decisions:'Decision Journal', memory:'Memory Bank', insights:'Insights' };
+const PAGE_TITLES = { dashboard:'Dashboard', chat:'AI Chat', ventures:'Ventures', tasks:'Tasks', decisions:'Decision Journal', memory:'Memory Bank', insights:'Insights', tools:'Tools & Skills' };
 
 function navigate(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -946,6 +986,7 @@ function navigate(page) {
   if (page === 'memory') renderMemory();
   if (page === 'insights') generateInsights();
   if (page === 'chat') renderSuggestions();
+  if (page === 'tools') renderTools();
 }
 
 let sidebarExpanded = false;
@@ -1430,6 +1471,63 @@ function showSetup() { document.getElementById('setup-modal').style.display = 'f
 function hideSetup() { document.getElementById('setup-modal').style.display = 'none'; }
 
 function renderAll() { renderDashboard(); updateVentureDropdowns(); }
+
+// ═══════════════════════════════════════════════
+// TOOLS PAGE
+// ═══════════════════════════════════════════════
+const TOOL_META = {
+  get_datetime: { icon: '🕐', label: 'Date & Time' },
+  calculate:    { icon: '🧮', label: 'Calculator' },
+  fetch_url:    { icon: '🌐', label: 'Fetch URL' },
+  save_note:    { icon: '📝', label: 'Save Note' },
+  get_notes:    { icon: '📋', label: 'Get Notes' },
+  web_search:   { icon: '🔍', label: 'Web Search' },
+};
+
+async function renderTools() {
+  const list = document.getElementById('tools-list');
+  const loading = document.getElementById('tools-loading');
+  list.innerHTML = '';
+  loading.style.display = 'flex';
+  try {
+    const res = await fetch(`${NEXUS_WORKER_URL}/tools`);
+    const { tools } = await res.json();
+    loading.style.display = 'none';
+    if (!tools?.length) { list.innerHTML = '<div class="empty-state"><div>No tools found. Make sure the tools table is set up in Supabase.</div></div>'; return; }
+    list.innerHTML = tools.map(t => {
+      const meta = TOOL_META[t.name] || { icon: '⚙', label: t.name };
+      const needsKey = t.name === 'web_search';
+      return `
+        <div class="tool-card">
+          <div class="tool-icon">${meta.icon}</div>
+          <div style="flex:1">
+            <div class="tool-name">${meta.label}</div>
+            <div class="tool-desc">${t.description}</div>
+            ${needsKey ? '<span class="tool-tag">Requires TAVILY_API_KEY secret</span>' : ''}
+          </div>
+          <label class="toggle" title="${t.enabled ? 'Disable' : 'Enable'} ${meta.label}">
+            <input type="checkbox" ${t.enabled ? 'checked' : ''} onchange="toggleTool('${t.name}', this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>`;
+    }).join('');
+  } catch (e) {
+    loading.style.display = 'none';
+    list.innerHTML = '<div class="empty-state"><div>Could not load tools. Check Worker connection.</div></div>';
+  }
+}
+
+async function toggleTool(name, enabled) {
+  try {
+    await fetch(`${NEXUS_WORKER_URL}/tools/${name}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+  } catch (e) {
+    console.error('Failed to update tool:', e);
+  }
+}
 
 // ═══════════════════════════════════════════════
 // CLEAR HISTORY

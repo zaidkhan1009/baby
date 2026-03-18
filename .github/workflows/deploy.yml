@@ -15,7 +15,16 @@ jobs:
 
       - name: Inject password hash
         run: |
-          sed -i "s/__PASSWORD_HASH__/${{ secrets.PASSWORD_HASH }}/g" index.html
+          sed -i "s|__PASSWORD_HASH__|${{ secrets.PASSWORD_HASH }}|g" index.html
+
+      - name: Verify injection
+        run: |
+          if grep -q "__PASSWORD_HASH__" index.html; then
+            echo "FAILED: Placeholder was not replaced. Check that PASSWORD_HASH secret is set."
+            exit 1
+          else
+            echo "SUCCESS: Hash injected into index.html"
+          fi
 
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v4
@@ -23,3 +32,4 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: .
           publish_branch: gh-pages
+          exclude_assets: '.github'

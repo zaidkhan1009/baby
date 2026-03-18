@@ -778,6 +778,13 @@
 
 <script>
 // ═══════════════════════════════════════════════
+// NEXUS WORKER — set this after deploying the worker
+// Run: cd worker && npm install && wrangler deploy
+// Then replace the URL below with your worker URL
+// ═══════════════════════════════════════════════
+const NEXUS_WORKER_URL = 'https://nexus-core.zaidkhan1009.workers.dev';
+
+// ═══════════════════════════════════════════════
 // AUTH — SHA-256 hash injected at deploy time
 // ═══════════════════════════════════════════════
 const _PH = 'f4617ba48c63cb6a8044081026b6fe2cfbbb14618fb4ee28527be9619bb2336c';
@@ -1254,18 +1261,16 @@ Key memories: ${state.memories.slice(0, 4).map(m => m.text).join('; ')}
 `;
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetch(`${NEXUS_WORKER_URL}/insights`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        system: `You are NEXUS, Umar's personal AI advisor. Based on his venture data, generate exactly 4 sharp, actionable business insights. Respond ONLY with a JSON array of objects with keys: icon (emoji), title (short), subtitle (category), body (2-3 sentences, India-specific, concrete numbers where possible), action (one-line call-to-action). No preamble, no markdown, pure JSON array.`,
-        messages: [{ role: 'user', content: `Generate 4 insights for this context: ${context}` }]
+        context: `Generate 4 insights for this context: ${context}`,
+        systemPrompt: `You are NEXUS, Umar's personal AI advisor. Based on his venture data, generate exactly 4 sharp, actionable business insights. Respond ONLY with a JSON array of objects with keys: icon (emoji), title (short), subtitle (category), body (2-3 sentences, India-specific, concrete numbers where possible), action (one-line call-to-action). No preamble, no markdown, pure JSON array.`,
       })
     });
     const data = await res.json();
-    const raw = data.content?.find(c => c.type === 'text')?.text || '[]';
+    const raw = data.text || '[]';
     const clean = raw.replace(/```json|```/g, '').trim();
     const insights = JSON.parse(clean);
     document.getElementById('insights-loading').style.display = 'none';
@@ -1385,18 +1390,13 @@ async function sendMessage() {
 
   try {
     const messages = state.chatHistory.map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.content }));
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetch(`${NEXUS_WORKER_URL}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        system: buildSystemPrompt(),
-        messages,
-      })
+      body: JSON.stringify({ messages, systemPrompt: buildSystemPrompt() })
     });
     const data = await res.json();
-    const reply = data.content?.find(c => c.type === 'text')?.text || 'Sorry, something went wrong.';
+    const reply = data.text || 'Sorry, something went wrong.';
     document.getElementById('typing')?.remove();
     appendMessage('ai', reply);
     state.chatHistory.push({ role: 'ai', content: reply });

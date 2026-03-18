@@ -1,0 +1,1515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="theme-color" content="#0a0a0f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>NEXUS — Umar's AI Command Centre</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #07070d;
+    --bg2: #0e0e1a;
+    --bg3: #14141f;
+    --surface: #1a1a2e;
+    --surface2: #20203a;
+    --border: rgba(120,120,255,0.12);
+    --border2: rgba(120,120,255,0.22);
+    --accent: #6c63ff;
+    --accent2: #a78bfa;
+    --accent3: #38bdf8;
+    --green: #34d399;
+    --orange: #fb923c;
+    --red: #f87171;
+    --yellow: #fbbf24;
+    --text: #e8e8f0;
+    --text2: #9999bb;
+    --text3: #5555aa;
+    --font-display: 'Syne', sans-serif;
+    --font-mono: 'DM Mono', monospace;
+    --font-body: 'Inter', sans-serif;
+    --radius: 14px;
+    --radius-sm: 8px;
+    --glow: 0 0 40px rgba(108,99,255,0.15);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Animated background grid */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(108,99,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(108,99,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── LAYOUT ── */
+  .app { display: flex; height: 100vh; position: relative; z-index: 1; }
+
+  /* ── SIDEBAR ── */
+  .sidebar {
+    width: 72px;
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px 0;
+    gap: 8px;
+    flex-shrink: 0;
+    z-index: 100;
+    transition: width 0.3s ease;
+  }
+  .sidebar.expanded { width: 220px; align-items: flex-start; padding: 20px 0; }
+
+  .logo {
+    width: 40px; height: 40px;
+    background: linear-gradient(135deg, var(--accent), var(--accent3));
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-display);
+    font-weight: 800; font-size: 16px;
+    color: white; margin-bottom: 16px;
+    flex-shrink: 0;
+    box-shadow: 0 0 20px rgba(108,99,255,0.4);
+  }
+  .sidebar.expanded .logo { margin-left: 16px; }
+
+  .nav-item {
+    width: 44px; height: 44px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: var(--text3);
+    font-size: 18px;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .sidebar.expanded .nav-item {
+    width: calc(100% - 24px);
+    margin: 0 12px;
+    padding: 0 12px;
+    justify-content: flex-start;
+    gap: 12px;
+  }
+  .nav-item:hover { background: var(--surface); color: var(--text); }
+  .nav-item.active { background: rgba(108,99,255,0.2); color: var(--accent2); }
+  .nav-label { font-size: 13px; font-weight: 500; display: none; white-space: nowrap; }
+  .sidebar.expanded .nav-label { display: block; }
+
+  .toggle-sidebar {
+    margin-top: auto;
+    width: 44px; height: 44px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; color: var(--text3); font-size: 16px;
+    transition: all 0.2s;
+  }
+  .sidebar.expanded .toggle-sidebar { width: calc(100% - 24px); margin: 0 12px; padding: 0 12px; justify-content: flex-start; gap: 12px; }
+  .toggle-sidebar:hover { background: var(--surface); color: var(--text); }
+
+  /* ── MAIN ── */
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── TOPBAR ── */
+  .topbar {
+    padding: 16px 24px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    background: rgba(14,14,26,0.8);
+    backdrop-filter: blur(12px);
+    flex-shrink: 0;
+  }
+  .page-title { font-family: var(--font-display); font-size: 20px; font-weight: 700; }
+  .topbar-right { display: flex; align-items: center; gap: 12px; }
+  .time-display { font-family: var(--font-mono); font-size: 13px; color: var(--text2); }
+  .status-dot { width: 8px; height: 8px; background: var(--green); border-radius: 50%; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  /* ── CONTENT AREA ── */
+  .content { flex: 1; overflow-y: auto; padding: 24px; }
+  .content::-webkit-scrollbar { width: 4px; }
+  .content::-webkit-scrollbar-track { background: transparent; }
+  .content::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+
+  /* ── PAGES ── */
+  .page { display: none; animation: fadeIn 0.3s ease; }
+  .page.active { display: block; }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+
+  /* ── CARDS ── */
+  .card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .card:hover { border-color: var(--border2); box-shadow: var(--glow); }
+  .card-title {
+    font-family: var(--font-display);
+    font-size: 13px; font-weight: 600;
+    color: var(--text2); text-transform: uppercase; letter-spacing: 1px;
+    margin-bottom: 16px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  @media(max-width:768px) { .grid-2,.grid-3 { grid-template-columns: 1fr; } }
+
+  /* ── DASHBOARD ── */
+  .greeting {
+    margin-bottom: 24px;
+  }
+  .greeting h1 { font-family: var(--font-display); font-size: 28px; font-weight: 800; }
+  .greeting p { color: var(--text2); margin-top: 4px; font-size: 14px; }
+
+  .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  @media(max-width:768px) { .stat-row { grid-template-columns: repeat(2,1fr); } }
+
+  .stat-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    text-align: center;
+  }
+  .stat-num { font-family: var(--font-display); font-size: 28px; font-weight: 800; }
+  .stat-label { font-size: 11px; color: var(--text2); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  /* ── VENTURES ── */
+  .venture-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px;
+    margin-bottom: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .venture-card:hover { border-color: var(--border2); transform: translateX(3px); }
+  .venture-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .venture-name { font-family: var(--font-display); font-size: 16px; font-weight: 700; }
+  .venture-status {
+    font-size: 11px; padding: 3px 10px; border-radius: 20px;
+    font-family: var(--font-mono);
+  }
+  .status-active { background: rgba(52,211,153,0.15); color: var(--green); }
+  .status-planning { background: rgba(251,191,36,0.15); color: var(--yellow); }
+  .status-paused { background: rgba(248,113,113,0.15); color: var(--red); }
+
+  .venture-meta { font-size: 13px; color: var(--text2); margin-bottom: 10px; }
+  .progress-bar {
+    height: 4px; background: var(--surface);
+    border-radius: 4px; overflow: hidden;
+  }
+  .progress-fill { height: 100%; border-radius: 4px; transition: width 0.6s ease; }
+
+  .next-action {
+    margin-top: 12px; padding: 10px 14px;
+    background: rgba(108,99,255,0.08);
+    border: 1px solid rgba(108,99,255,0.15);
+    border-radius: var(--radius-sm);
+    font-size: 12px; color: var(--accent2);
+  }
+  .next-action span { color: var(--text2); }
+
+  /* ── CHAT ── */
+  .chat-container {
+    display: flex; flex-direction: column;
+    height: calc(100vh - 130px);
+  }
+  .chat-messages {
+    flex: 1; overflow-y: auto; padding: 16px 0;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .chat-messages::-webkit-scrollbar { width: 3px; }
+  .chat-messages::-webkit-scrollbar-thumb { background: var(--border); }
+
+  .message { display: flex; gap: 12px; max-width: 85%; }
+  .message.user { flex-direction: row-reverse; margin-left: auto; }
+  .message-avatar {
+    width: 32px; height: 32px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; flex-shrink: 0;
+  }
+  .ai-avatar { background: linear-gradient(135deg, var(--accent), var(--accent3)); }
+  .user-avatar { background: var(--surface2); font-family: var(--font-display); font-weight: 700; font-size: 12px; }
+
+  .message-bubble {
+    padding: 12px 16px; border-radius: 12px;
+    font-size: 14px; line-height: 1.6;
+  }
+  .ai-bubble {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 4px 12px 12px 12px;
+  }
+  .user-bubble {
+    background: rgba(108,99,255,0.2); border: 1px solid rgba(108,99,255,0.3);
+    border-radius: 12px 4px 12px 12px;
+  }
+
+  .chat-input-area {
+    padding: 16px 0 0;
+    border-top: 1px solid var(--border);
+  }
+  .chat-suggestions {
+    display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;
+  }
+  .suggestion-chip {
+    font-size: 12px; padding: 6px 12px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 20px; cursor: pointer; color: var(--text2);
+    transition: all 0.2s; white-space: nowrap;
+  }
+  .suggestion-chip:hover { background: var(--surface2); color: var(--text); border-color: var(--accent); }
+
+  .input-row { display: flex; gap: 10px; }
+  .chat-input {
+    flex: 1; background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 16px;
+    color: var(--text); font-size: 14px; font-family: var(--font-body);
+    outline: none; resize: none; min-height: 48px; max-height: 120px;
+    transition: border-color 0.2s;
+  }
+  .chat-input:focus { border-color: var(--accent); }
+  .chat-input::placeholder { color: var(--text3); }
+
+  .send-btn {
+    width: 48px; height: 48px;
+    background: linear-gradient(135deg, var(--accent), var(--accent3));
+    border: none; border-radius: 10px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; transition: opacity 0.2s, transform 0.1s;
+    flex-shrink: 0;
+  }
+  .send-btn:hover { opacity: 0.85; }
+  .send-btn:active { transform: scale(0.95); }
+
+  /* ── MEMORY ── */
+  .memory-item {
+    padding: 14px 16px;
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); margin-bottom: 10px;
+    display: flex; align-items: flex-start; gap: 12px;
+    transition: border-color 0.2s;
+  }
+  .memory-item:hover { border-color: var(--border2); }
+  .memory-icon { font-size: 16px; margin-top: 2px; flex-shrink: 0; }
+  .memory-text { flex: 1; font-size: 13px; line-height: 1.5; }
+  .memory-meta { font-family: var(--font-mono); font-size: 11px; color: var(--text3); margin-top: 4px; }
+  .memory-tag {
+    font-size: 10px; padding: 2px 8px; border-radius: 4px;
+    background: var(--surface); color: var(--text2);
+    margin-left: auto; flex-shrink: 0;
+  }
+  .del-btn { background: none; border: none; cursor: pointer; color: var(--text3); font-size: 14px; padding: 4px; transition: color 0.2s; }
+  .del-btn:hover { color: var(--red); }
+
+  /* ── DECISIONS ── */
+  .decision-card {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px; margin-bottom: 12px;
+    transition: border-color 0.2s;
+  }
+  .decision-card:hover { border-color: var(--border2); }
+  .decision-q { font-weight: 600; margin-bottom: 8px; font-size: 14px; }
+  .decision-a { font-size: 13px; color: var(--accent2); margin-bottom: 8px; }
+  .decision-footer { display: flex; align-items: center; justify-content: space-between; }
+  .outcome-tag {
+    font-size: 11px; padding: 3px 10px; border-radius: 20px;
+    font-family: var(--font-mono);
+  }
+  .outcome-good { background: rgba(52,211,153,0.15); color: var(--green); }
+  .outcome-pending { background: rgba(251,191,36,0.15); color: var(--yellow); }
+  .outcome-bad { background: rgba(248,113,113,0.15); color: var(--red); }
+
+  /* ── TASKS ── */
+  .task-item {
+    padding: 12px 16px;
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); margin-bottom: 8px;
+    display: flex; align-items: center; gap: 12px;
+    transition: all 0.2s; cursor: pointer;
+  }
+  .task-item:hover { border-color: var(--border2); }
+  .task-item.done { opacity: 0.45; }
+  .task-item.done .task-text { text-decoration: line-through; color: var(--text3); }
+  .task-check {
+    width: 18px; height: 18px; border-radius: 5px;
+    border: 2px solid var(--border2); flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+  }
+  .task-item.done .task-check { background: var(--green); border-color: var(--green); }
+  .task-text { flex: 1; font-size: 13px; }
+  .task-venture { font-size: 11px; color: var(--text3); font-family: var(--font-mono); }
+  .task-priority { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .p-high { background: var(--red); }
+  .p-med { background: var(--yellow); }
+  .p-low { background: var(--green); }
+
+  /* ── INSIGHTS ── */
+  .insight-card {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px; margin-bottom: 14px;
+  }
+  .insight-header { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 10px; }
+  .insight-icon { font-size: 22px; }
+  .insight-title { font-weight: 600; font-size: 14px; }
+  .insight-subtitle { font-size: 12px; color: var(--text2); margin-top: 2px; }
+  .insight-body { font-size: 13px; color: var(--text2); line-height: 1.7; }
+  .insight-action {
+    margin-top: 12px; display: inline-block;
+    font-size: 12px; color: var(--accent3);
+    border-bottom: 1px solid rgba(56,189,248,0.3); cursor: pointer;
+  }
+
+  /* ── ADD FORMS ── */
+  .add-form {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px; margin-bottom: 20px;
+  }
+  .add-form h3 { font-family: var(--font-display); font-size: 15px; margin-bottom: 16px; }
+  .form-row { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  .form-input {
+    flex: 1; min-width: 180px;
+    background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 14px;
+    color: var(--text); font-size: 13px; font-family: var(--font-body);
+    outline: none; transition: border-color 0.2s;
+  }
+  .form-input:focus { border-color: var(--accent); }
+  .form-input::placeholder { color: var(--text3); }
+  select.form-input option { background: var(--bg3); }
+
+  .btn {
+    padding: 10px 20px; border-radius: 8px;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+    border: none; transition: all 0.2s;
+  }
+  .btn-primary { background: var(--accent); color: white; }
+  .btn-primary:hover { background: #5a52e8; }
+  .btn-sm { padding: 6px 14px; font-size: 12px; }
+
+  /* ── LOADING ── */
+  .typing-indicator { display: flex; gap: 4px; padding: 4px 0; }
+  .typing-dot { width: 6px; height: 6px; background: var(--text3); border-radius: 50%; animation: typing 1.2s infinite; }
+  .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+  .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes typing { 0%,80%,100%{transform:scale(0.8);opacity:0.5} 40%{transform:scale(1);opacity:1} }
+
+  /* ── PATTERNS ── */
+  .pattern-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border-radius: 20px;
+    background: rgba(167,139,250,0.1); border: 1px solid rgba(167,139,250,0.2);
+    font-size: 12px; color: var(--accent2); margin: 4px;
+  }
+
+  /* ── SECTION HEADER ── */
+  .section-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .section-title { font-family: var(--font-display); font-size: 18px; font-weight: 700; }
+
+  /* Mobile bottom nav */
+  .mobile-nav {
+    display: none;
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: var(--bg2); border-top: 1px solid var(--border);
+    padding: 8px 0 calc(8px + env(safe-area-inset-bottom));
+    z-index: 200;
+  }
+  .mobile-nav-inner { display: flex; justify-content: space-around; }
+  .mobile-nav-item {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    padding: 6px 12px; border-radius: 8px; cursor: pointer;
+    color: var(--text3); font-size: 10px; transition: all 0.2s;
+  }
+  .mobile-nav-item.active { color: var(--accent2); }
+  .mobile-nav-item span:first-child { font-size: 20px; }
+
+  @media(max-width:640px) {
+    .sidebar { display: none; }
+    .mobile-nav { display: block; }
+    .content { padding: 16px; padding-bottom: 90px; }
+    .topbar { padding: 12px 16px; }
+    .chat-container { height: calc(100vh - 200px); }
+    .stat-row { grid-template-columns: repeat(2,1fr); }
+  }
+
+  /* Tooltip */
+  [data-tip] { position: relative; }
+  [data-tip]:hover::after {
+    content: attr(data-tip);
+    position: absolute; bottom: calc(100% + 8px); left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface2); color: var(--text); font-size: 11px;
+    padding: 4px 10px; border-radius: 6px; white-space: nowrap;
+    pointer-events: none; z-index: 999;
+  }
+
+  /* Glow effect on accent elements */
+  .glow { box-shadow: 0 0 20px rgba(108,99,255,0.3); }
+
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-family: var(--font-mono); }
+  .tag-blue { background: rgba(56,189,248,0.15); color: var(--accent3); }
+  .tag-purple { background: rgba(108,99,255,0.15); color: var(--accent2); }
+  .tag-green { background: rgba(52,211,153,0.15); color: var(--green); }
+
+  .empty-state { text-align: center; padding: 48px 24px; color: var(--text3); font-size: 14px; }
+  .empty-state .icon { font-size: 40px; margin-bottom: 12px; }
+
+  /* ── LOGIN SCREEN ── */
+  #login-screen {
+    position: fixed; inset: 0; z-index: 9999;
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #login-screen.hidden { display: none; }
+  .login-box {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: var(--radius);
+    padding: 40px 36px;
+    width: 340px;
+    box-shadow: var(--glow);
+  }
+  .login-logo {
+    width: 44px; height: 44px;
+    background: linear-gradient(135deg, var(--accent), var(--accent3));
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-display);
+    font-weight: 800; font-size: 18px; color: white;
+    margin: 0 auto 20px;
+    box-shadow: 0 0 20px rgba(108,99,255,0.4);
+  }
+  .login-title {
+    font-family: var(--font-display);
+    font-size: 20px; font-weight: 700;
+    text-align: center; margin-bottom: 6px;
+  }
+  .login-sub { font-size: 13px; color: var(--text2); text-align: center; margin-bottom: 28px; }
+  .login-input {
+    width: 100%; background: var(--bg3);
+    border: 1px solid var(--border2);
+    border-radius: var(--radius-sm);
+    padding: 11px 14px; color: var(--text);
+    font-size: 14px; font-family: var(--font-body);
+    outline: none; margin-bottom: 12px;
+    transition: border-color 0.2s;
+  }
+  .login-input:focus { border-color: var(--accent); }
+  .login-btn {
+    width: 100%; padding: 12px;
+    background: var(--accent); color: white;
+    border: none; border-radius: var(--radius-sm);
+    font-size: 14px; font-weight: 600;
+    font-family: var(--font-body);
+    cursor: pointer; transition: opacity 0.2s;
+  }
+  .login-btn:hover { opacity: 0.85; }
+  .login-error { color: var(--red); font-size: 12px; text-align: center; margin-top: 10px; min-height: 16px; }
+</style>
+</head>
+<body>
+
+<!-- LOGIN SCREEN -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-logo">N</div>
+    <div class="login-title">NEXUS</div>
+    <div class="login-sub">Enter your password to continue</div>
+    <input id="login-pass" class="login-input" type="password" placeholder="Password" autocomplete="current-password"
+      onkeydown="if(event.key==='Enter')doLogin()" />
+    <button class="login-btn" onclick="doLogin()">Unlock</button>
+    <div class="login-error" id="login-error"></div>
+  </div>
+</div>
+
+<div class="app">
+  <!-- SIDEBAR (desktop) -->
+  <div class="sidebar" id="sidebar">
+    <div class="logo">N</div>
+    <div class="nav-item active" onclick="navigate('dashboard')" data-page="dashboard">
+      <span>⬡</span><span class="nav-label">Dashboard</span>
+    </div>
+    <div class="nav-item" onclick="navigate('chat')" data-page="chat">
+      <span>◎</span><span class="nav-label">AI Chat</span>
+    </div>
+    <div class="nav-item" onclick="navigate('ventures')" data-page="ventures">
+      <span>◈</span><span class="nav-label">Ventures</span>
+    </div>
+    <div class="nav-item" onclick="navigate('tasks')" data-page="tasks">
+      <span>◻</span><span class="nav-label">Tasks</span>
+    </div>
+    <div class="nav-item" onclick="navigate('decisions')" data-page="decisions">
+      <span>◉</span><span class="nav-label">Decisions</span>
+    </div>
+    <div class="nav-item" onclick="navigate('memory')" data-page="memory">
+      <span>◆</span><span class="nav-label">Memory</span>
+    </div>
+    <div class="nav-item" onclick="navigate('insights')" data-page="insights">
+      <span>◐</span><span class="nav-label">Insights</span>
+    </div>
+    <div class="toggle-sidebar" onclick="toggleSidebar()">
+      <span id="toggle-icon">▶</span>
+      <span class="nav-label" id="toggle-label">Expand</span>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main">
+    <div class="topbar">
+      <div class="page-title" id="page-title">Dashboard</div>
+      <div class="topbar-right">
+        <div id="sync-status" style="display:flex;align-items:center;gap:5px;cursor:pointer" onclick="showSetup()" data-tip="Cloud Sync Settings">
+          <span>💾</span><span style="color:var(--text3);font-size:11px;font-family:var(--font-mono)">Local only</span>
+        </div>
+        <div class="time-display" id="clock">--:--</div>
+        <div class="status-dot" data-tip="AI Online"></div>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- ══ DASHBOARD ══ -->
+      <div class="page active" id="page-dashboard">
+        <div class="greeting">
+          <h1 id="greeting-text">Good morning, Umar 👋</h1>
+          <p id="greeting-sub">Here's your command centre overview for today.</p>
+        </div>
+
+        <div class="stat-row" id="stat-row"></div>
+
+        <div class="grid-2" style="margin-bottom:20px">
+          <div class="card">
+            <div class="card-title">⚡ Today's Focus</div>
+            <div id="focus-list"></div>
+          </div>
+          <div class="card">
+            <div class="card-title">🧠 AI Insight of the Day</div>
+            <div id="daily-insight" style="font-size:13px;color:var(--text2);line-height:1.7"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">📊 Active Ventures — Quick View</div>
+          <div id="dash-ventures"></div>
+        </div>
+      </div>
+
+      <!-- ══ AI CHAT ══ -->
+      <div class="page" id="page-chat">
+        <div class="chat-container">
+          <div class="chat-messages" id="chat-messages"></div>
+          <div class="chat-input-area">
+            <div class="chat-suggestions" id="suggestions"></div>
+            <div class="input-row">
+              <textarea class="chat-input" id="chat-input" placeholder="Ask anything about your business..." rows="1"
+                onkeydown="handleKey(event)"></textarea>
+              <button class="send-btn" onclick="sendMessage()">➤</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ VENTURES ══ -->
+      <div class="page" id="page-ventures">
+        <div class="section-header">
+          <div class="section-title">Your Ventures</div>
+          <button class="btn btn-primary btn-sm" onclick="toggleAddVenture()">+ Add Venture</button>
+        </div>
+        <div class="add-form" id="add-venture-form" style="display:none">
+          <h3>Add New Venture</h3>
+          <div class="form-row">
+            <input class="form-input" id="v-name" placeholder="Venture name" />
+            <select class="form-input" id="v-status">
+              <option value="active">Active</option>
+              <option value="planning">Planning</option>
+              <option value="paused">Paused</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <input class="form-input" id="v-desc" placeholder="Short description" />
+            <input class="form-input" id="v-next" placeholder="Next action" />
+          </div>
+          <div class="form-row">
+            <input class="form-input" id="v-invest" placeholder="Investment (₹)" type="number" />
+            <input class="form-input" id="v-progress" placeholder="Progress % (0-100)" type="number" min="0" max="100" />
+          </div>
+          <button class="btn btn-primary" onclick="addVenture()">Save Venture</button>
+        </div>
+        <div id="ventures-list"></div>
+      </div>
+
+      <!-- ══ TASKS ══ -->
+      <div class="page" id="page-tasks">
+        <div class="section-header">
+          <div class="section-title">Task Manager</div>
+          <button class="btn btn-primary btn-sm" onclick="toggleAddTask()">+ Add Task</button>
+        </div>
+        <div class="add-form" id="add-task-form" style="display:none">
+          <h3>Add New Task</h3>
+          <div class="form-row">
+            <input class="form-input" id="t-text" placeholder="Task description" />
+            <select class="form-input" id="t-venture">
+              <option value="General">General</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <select class="form-input" id="t-priority">
+              <option value="high">🔴 High Priority</option>
+              <option value="med">🟡 Medium Priority</option>
+              <option value="low">🟢 Low Priority</option>
+            </select>
+            <input class="form-input" id="t-due" type="date" />
+          </div>
+          <button class="btn btn-primary" onclick="addTask()">Save Task</button>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap" id="task-filters"></div>
+        <div id="tasks-list"></div>
+      </div>
+
+      <!-- ══ DECISIONS ══ -->
+      <div class="page" id="page-decisions">
+        <div class="section-header">
+          <div class="section-title">Decision Journal</div>
+          <button class="btn btn-primary btn-sm" onclick="toggleAddDecision()">+ Log Decision</button>
+        </div>
+        <div class="add-form" id="add-decision-form" style="display:none">
+          <h3>Log a Decision</h3>
+          <div class="form-row">
+            <input class="form-input" id="d-q" placeholder="What was the question / situation?" />
+          </div>
+          <div class="form-row">
+            <input class="form-input" id="d-a" placeholder="What did you decide?" />
+            <select class="form-input" id="d-venture">
+              <option value="General">General</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <input class="form-input" id="d-reason" placeholder="Why? (optional)" />
+          </div>
+          <button class="btn btn-primary" onclick="addDecision()">Log Decision</button>
+        </div>
+        <div id="decisions-list"></div>
+
+        <div class="card" style="margin-top:24px">
+          <div class="card-title">🔁 Detected Patterns</div>
+          <div id="patterns-list" style="font-size:13px;color:var(--text2);line-height:1.9"></div>
+        </div>
+      </div>
+
+      <!-- ══ MEMORY ══ -->
+      <div class="page" id="page-memory">
+        <div class="section-header">
+          <div class="section-title">AI Memory Bank</div>
+          <button class="btn btn-primary btn-sm" onclick="toggleAddMemory()">+ Add Memory</button>
+        </div>
+        <div class="add-form" id="add-memory-form" style="display:none">
+          <h3>Store a Memory</h3>
+          <div class="form-row">
+            <input class="form-input" id="m-text" placeholder="What should I always remember about you?" />
+            <select class="form-input" id="m-tag">
+              <option value="preference">Preference</option>
+              <option value="context">Context</option>
+              <option value="constraint">Constraint</option>
+              <option value="goal">Goal</option>
+              <option value="fact">Fact</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" onclick="addMemory()">Store Memory</button>
+        </div>
+        <div id="memory-list"></div>
+      </div>
+
+      <!-- ══ INSIGHTS ══ -->
+      <div class="page" id="page-insights">
+        <div class="section-header">
+          <div class="section-title">AI Insights & Patterns</div>
+          <button class="btn btn-primary btn-sm" onclick="generateInsights()">↻ Refresh</button>
+        </div>
+        <div id="insights-loading" style="display:none" class="empty-state">
+          <div class="typing-indicator" style="justify-content:center;margin-bottom:12px">
+            <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
+          </div>
+          Analysing your data...
+        </div>
+        <div id="insights-list"></div>
+      </div>
+
+    </div><!-- /content -->
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<!-- MOBILE BOTTOM NAV -->
+<div class="mobile-nav">
+  <div class="mobile-nav-inner">
+    <div class="mobile-nav-item active" onclick="navigate('dashboard')" data-page="dashboard"><span>⬡</span><span>Home</span></div>
+    <div class="mobile-nav-item" onclick="navigate('chat')" data-page="chat"><span>◎</span><span>Chat</span></div>
+    <div class="mobile-nav-item" onclick="navigate('ventures')" data-page="ventures"><span>◈</span><span>Ventures</span></div>
+    <div class="mobile-nav-item" onclick="navigate('tasks')" data-page="tasks"><span>◻</span><span>Tasks</span></div>
+    <div class="mobile-nav-item" onclick="navigate('insights')" data-page="insights"><span>◐</span><span>Insights</span></div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════
+// AUTH — SHA-256 hash injected at deploy time
+// ═══════════════════════════════════════════════
+const _PH = 'f4617ba48c63cb6a8044081026b6fe2cfbbb14618fb4ee28527be9619bb2336c';
+
+async function sha256(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function doLogin() {
+  const pass = document.getElementById('login-pass').value;
+  const err = document.getElementById('login-error');
+  if (!pass) { err.textContent = 'Please enter your password.'; return; }
+  const hash = await sha256(pass);
+  if (hash === _PH) {
+    sessionStorage.setItem('nexus_auth', _PH);
+    document.getElementById('login-screen').classList.add('hidden');
+  } else {
+    err.textContent = 'Incorrect password.';
+    document.getElementById('login-pass').value = '';
+  }
+}
+
+(function checkAuth() {
+  if (sessionStorage.getItem('nexus_auth') === _PH) {
+    document.getElementById('login-screen').classList.add('hidden');
+  }
+})();
+
+// ═══════════════════════════════════════════════
+// CLOUD SYNC — JSONBin.io + localStorage fallback
+// ═══════════════════════════════════════════════
+const KEY = 'nexus_v2';
+const CFG_KEY = 'nexus_cfg';
+
+let syncConfig = (() => { try { return JSON.parse(localStorage.getItem(CFG_KEY)) || {}; } catch { return {}; } })();
+let syncTimeout = null;
+let isSyncing = false;
+
+function saveCfg() { localStorage.setItem(CFG_KEY, JSON.stringify(syncConfig)); }
+
+function load() {
+  try { return JSON.parse(localStorage.getItem(KEY)) || defaultState(); } catch { return defaultState(); }
+}
+
+function save() {
+  localStorage.setItem(KEY, JSON.stringify(state));
+  // Debounce cloud save — wait 1.5s after last change
+  clearTimeout(syncTimeout);
+  syncTimeout = setTimeout(cloudSave, 1500);
+}
+
+async function cloudSave() {
+  if (!syncConfig.binId || !syncConfig.apiKey) return;
+  if (isSyncing) return;
+  isSyncing = true;
+  setSyncStatus('saving');
+  try {
+    await fetch(`https://api.jsonbin.io/v3/b/${syncConfig.binId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Master-Key': syncConfig.apiKey },
+      body: JSON.stringify(state)
+    });
+    setSyncStatus('saved');
+  } catch (e) {
+    setSyncStatus('error');
+  }
+  isSyncing = false;
+}
+
+async function cloudLoad() {
+  if (!syncConfig.binId || !syncConfig.apiKey) return false;
+  setSyncStatus('loading');
+  try {
+    const res = await fetch(`https://api.jsonbin.io/v3/b/${syncConfig.binId}/latest`, {
+      headers: { 'X-Master-Key': syncConfig.apiKey }
+    });
+    if (!res.ok) throw new Error('Bad response');
+    const data = await res.json();
+    if (data.record) {
+      state = data.record;
+      localStorage.setItem(KEY, JSON.stringify(state));
+      setSyncStatus('synced');
+      return true;
+    }
+  } catch (e) {
+    setSyncStatus('error');
+  }
+  return false;
+}
+
+function setSyncStatus(status) {
+  const el = document.getElementById('sync-status');
+  if (!el) return;
+  const map = {
+    saving: ['🔄', 'Saving...', 'var(--yellow)'],
+    saved: ['☁️', 'Saved to cloud', 'var(--green)'],
+    synced: ['✅', 'Synced', 'var(--green)'],
+    loading: ['🔄', 'Loading...', 'var(--accent2)'],
+    error: ['⚠️', 'Sync error', 'var(--red)'],
+    offline: ['💾', 'Local only', 'var(--text3)'],
+  };
+  const [icon, label, color] = map[status] || map.offline;
+  el.innerHTML = `<span>${icon}</span><span style="color:${color};font-size:11px;font-family:var(--font-mono)">${label}</span>`;
+}
+
+function defaultState() {
+  return {
+    ventures: [
+      { id: 1, name: 'Cloud Kitchen', status: 'active', desc: 'Running on Swiggy/Zomato. Commission issue', next: 'Explore direct ordering system', invest: 300000, progress: 65, color: '#6c63ff' },
+      { id: 2, name: 'Café / Mini Restaurant', status: 'planning', desc: '5–6 tables, looking for location', next: 'Finalize physical location this week', invest: 500000, progress: 20, color: '#38bdf8' },
+      { id: 3, name: 'Poultry Farm', status: 'planning', desc: 'Broilers + eggs + pet food from waste', next: 'Start after café stabilizes', invest: 400000, progress: 5, color: '#34d399' },
+    ],
+    tasks: [
+      { id: 1, text: 'Scout 3 café locations in target area', venture: 'Café / Mini Restaurant', priority: 'high', done: false, due: '' },
+      { id: 2, text: 'Research direct online ordering apps (no commission)', venture: 'Cloud Kitchen', priority: 'high', done: false, due: '' },
+      { id: 3, text: 'Apply for PMEGP subsidy for café', venture: 'Café / Mini Restaurant', priority: 'med', done: false, due: '' },
+      { id: 4, text: 'Get NABARD loan details for poultry', venture: 'Poultry Farm', priority: 'low', done: false, due: '' },
+      { id: 5, text: 'Negotiate commission rate with Zomato', venture: 'Cloud Kitchen', priority: 'med', done: false, due: '' },
+    ],
+    decisions: [
+      { id: 1, q: 'Should I run café and cloud kitchen at the same time?', a: 'Yes — run both in parallel', reason: 'Cash flow from kitchen funds café setup', venture: 'General', outcome: 'pending', date: '2025-03-01' },
+      { id: 2, q: 'When to start poultry farm?', a: 'After café stabilizes (6-12 months)', reason: 'Avoid spreading resources too thin', venture: 'Poultry Farm', outcome: 'pending', date: '2025-03-05' },
+    ],
+    memories: [
+      { id: 1, text: 'I am based in India and run a cloud kitchen currently underperforming due to platform commissions.', tag: 'context', date: '2025-03-01' },
+      { id: 2, text: 'I prefer structured analysis with real Indian market numbers and honest risk assessments.', tag: 'preference', date: '2025-03-01' },
+      { id: 3, text: 'I am actively looking for a physical location for a 5–6 table café/mini restaurant.', tag: 'goal', date: '2025-03-10' },
+      { id: 4, text: 'I use PMEGP, MUDRA loans and NABARD as financing sources.', tag: 'fact', date: '2025-03-01' },
+      { id: 5, text: 'I want to start poultry farming (broilers + eggs + pet food) after café is stable.', tag: 'goal', date: '2025-03-10' },
+    ],
+    chatHistory: [],
+    taskFilter: 'all',
+    nextId: 100,
+  };
+}
+
+let state = load();
+
+// ═══════════════════════════════════════════════
+// NAVIGATION
+// ═══════════════════════════════════════════════
+const PAGE_TITLES = { dashboard:'Dashboard', chat:'AI Chat', ventures:'Ventures', tasks:'Tasks', decisions:'Decision Journal', memory:'Memory Bank', insights:'Insights' };
+
+function navigate(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + page).classList.add('active');
+  document.querySelectorAll('.nav-item, .mobile-nav-item').forEach(n => {
+    n.classList.toggle('active', n.dataset.page === page);
+  });
+  document.getElementById('page-title').textContent = PAGE_TITLES[page];
+  if (page === 'dashboard') renderDashboard();
+  if (page === 'ventures') renderVentures();
+  if (page === 'tasks') renderTasks();
+  if (page === 'decisions') renderDecisions();
+  if (page === 'memory') renderMemory();
+  if (page === 'insights') generateInsights();
+  if (page === 'chat') renderSuggestions();
+}
+
+let sidebarExpanded = false;
+function toggleSidebar() {
+  sidebarExpanded = !sidebarExpanded;
+  document.getElementById('sidebar').classList.toggle('expanded', sidebarExpanded);
+  document.getElementById('toggle-icon').textContent = sidebarExpanded ? '◀' : '▶';
+  document.getElementById('toggle-label').textContent = sidebarExpanded ? 'Collapse' : 'Expand';
+}
+
+// ═══════════════════════════════════════════════
+// CLOCK & GREETING
+// ═══════════════════════════════════════════════
+function updateClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+  const h = now.getHours();
+  const g = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+  const el = document.getElementById('greeting-text');
+  if (el) el.textContent = `${g}, Umar 👋`;
+  const sub = document.getElementById('greeting-sub');
+  if (sub) sub.textContent = `Today is ${now.toLocaleDateString('en-IN', { weekday:'long', day:'numeric', month:'long' })}. Here's your command centre.`;
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ═══════════════════════════════════════════════
+// DASHBOARD
+// ═══════════════════════════════════════════════
+function renderDashboard() {
+  // Stats
+  const pending = state.tasks.filter(t => !t.done).length;
+  const done = state.tasks.filter(t => t.done).length;
+  const active = state.ventures.filter(v => v.status === 'active').length;
+  document.getElementById('stat-row').innerHTML = `
+    <div class="stat-card"><div class="stat-num" style="color:var(--accent2)">${state.ventures.length}</div><div class="stat-label">Ventures</div></div>
+    <div class="stat-card"><div class="stat-num" style="color:var(--red)">${pending}</div><div class="stat-label">Pending Tasks</div></div>
+    <div class="stat-card"><div class="stat-num" style="color:var(--green)">${done}</div><div class="stat-label">Tasks Done</div></div>
+    <div class="stat-card"><div class="stat-num" style="color:var(--accent3)">${state.decisions.length}</div><div class="stat-label">Decisions Logged</div></div>
+  `;
+
+  // Focus
+  const high = state.tasks.filter(t => !t.done && t.priority === 'high').slice(0, 3);
+  document.getElementById('focus-list').innerHTML = high.length ? high.map(t => `
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <div class="task-priority p-high"></div>
+      <div style="font-size:13px">${t.text}</div>
+      <div class="task-venture" style="margin-left:auto">${t.venture}</div>
+    </div>`).join('') : '<div class="empty-state" style="padding:20px"><div>✅ All high priority tasks done!</div></div>';
+
+  // Insight
+  const insights = [
+    `Your Cloud Kitchen is your current cash engine. Before expanding, consider setting up a <strong style="color:var(--accent2)">direct WhatsApp/website ordering system</strong> to reduce commission leakage — could save ₹15,000–₹30,000/month.`,
+    `You've been planning the café for a while now. The <strong style="color:var(--accent2)">location decision</strong> is the highest-leverage choice right now — a good location can compensate for many other weaknesses.`,
+    `Your phased approach (Kitchen → Café → Poultry) is smart. Avoid starting Poultry until the café crosses <strong style="color:var(--accent2)">break-even</strong> — typically 3–4 months post-launch.`,
+    `PMEGP subsidy requires Udyam registration and a DPR. If you haven't started the paperwork yet, <strong style="color:var(--accent2)">start this week</strong> — processing takes 60–90 days.`,
+  ];
+  document.getElementById('daily-insight').innerHTML = insights[Math.floor(Math.random() * insights.length)];
+
+  // Venture cards
+  document.getElementById('dash-ventures').innerHTML = state.ventures.map(v => `
+    <div style="display:flex;align-items:center;gap:16px;padding:12px 0;border-bottom:1px solid var(--border)">
+      <div style="width:36px;height:36px;border-radius:8px;background:${v.color}22;display:flex;align-items:center;justify-content:center;font-size:14px;border:1px solid ${v.color}44;flex-shrink:0">
+        ${v.name[0]}
+      </div>
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:13px">${v.name}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px">${v.next}</div>
+        <div class="progress-bar" style="margin-top:6px">
+          <div class="progress-fill" style="width:${v.progress}%;background:${v.color}"></div>
+        </div>
+      </div>
+      <div class="venture-status status-${v.status}">${v.status}</div>
+    </div>`).join('');
+}
+
+// ═══════════════════════════════════════════════
+// VENTURES
+// ═══════════════════════════════════════════════
+function renderVentures() {
+  const colors = ['#6c63ff','#38bdf8','#34d399','#fb923c','#f87171','#fbbf24'];
+  document.getElementById('ventures-list').innerHTML = state.ventures.map((v, i) => `
+    <div class="venture-card">
+      <div class="venture-header">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:10px;height:10px;border-radius:50%;background:${v.color || colors[i%colors.length]};box-shadow:0 0 10px ${v.color || colors[i%colors.length]}"></div>
+          <div class="venture-name">${v.name}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="venture-status status-${v.status}">${v.status}</div>
+          <button class="del-btn" onclick="deleteVenture(${v.id})">✕</button>
+        </div>
+      </div>
+      <div class="venture-meta">${v.desc}</div>
+      ${v.invest ? `<div style="font-size:12px;color:var(--text3);margin-bottom:8px">Investment target: <span style="color:var(--text2)">₹${Number(v.invest).toLocaleString('en-IN')}</span></div>` : ''}
+      <div class="progress-bar">
+        <div class="progress-fill" style="width:${v.progress}%;background:${v.color || colors[i%colors.length]}"></div>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px;text-align:right;font-family:var(--font-mono)">${v.progress}% complete</div>
+      <div class="next-action">⚡ <span>Next action:</span> ${v.next}</div>
+    </div>`).join('') || '<div class="empty-state"><div class="icon">◈</div><div>No ventures yet. Add your first one!</div></div>';
+}
+
+function toggleAddVenture() {
+  const f = document.getElementById('add-venture-form');
+  f.style.display = f.style.display === 'none' ? 'block' : 'none';
+}
+
+function addVenture() {
+  const name = document.getElementById('v-name').value.trim();
+  if (!name) return;
+  const colors = ['#6c63ff','#38bdf8','#34d399','#fb923c','#f87171','#fbbf24','#a78bfa'];
+  state.ventures.push({
+    id: state.nextId++,
+    name,
+    status: document.getElementById('v-status').value,
+    desc: document.getElementById('v-desc').value || 'No description',
+    next: document.getElementById('v-next').value || 'Define next action',
+    invest: document.getElementById('v-invest').value || 0,
+    progress: parseInt(document.getElementById('v-progress').value) || 0,
+    color: colors[state.ventures.length % colors.length],
+  });
+  save();
+  renderVentures();
+  updateVentureDropdowns();
+  toggleAddVenture();
+  ['v-name','v-desc','v-next','v-invest','v-progress'].forEach(id => document.getElementById(id).value = '');
+}
+
+function deleteVenture(id) {
+  state.ventures = state.ventures.filter(v => v.id !== id);
+  save(); renderVentures(); renderDashboard();
+}
+
+// ═══════════════════════════════════════════════
+// TASKS
+// ═══════════════════════════════════════════════
+function renderTasks() {
+  const ventures = ['all', ...new Set(state.tasks.map(t => t.venture))];
+  document.getElementById('task-filters').innerHTML = ventures.map(v => `
+    <div class="suggestion-chip ${state.taskFilter === v ? 'active-filter' : ''}" 
+         onclick="setTaskFilter('${v}')" style="${state.taskFilter === v ? 'border-color:var(--accent);color:var(--accent2)' : ''}">${v === 'all' ? '📋 All' : v}</div>`).join('');
+
+  const filtered = state.taskFilter === 'all' ? state.tasks : state.tasks.filter(t => t.venture === state.taskFilter);
+  const pending = filtered.filter(t => !t.done);
+  const done = filtered.filter(t => t.done);
+
+  const renderItem = t => `
+    <div class="task-item ${t.done ? 'done' : ''}" onclick="toggleTask(${t.id})">
+      <div class="task-check">${t.done ? '✓' : ''}</div>
+      <div class="task-priority p-${t.priority}"></div>
+      <div class="task-text">${t.text}</div>
+      <div class="task-venture">${t.venture}</div>
+      <button class="del-btn" onclick="event.stopPropagation();deleteTask(${t.id})">✕</button>
+    </div>`;
+
+  document.getElementById('tasks-list').innerHTML =
+    (pending.length ? `<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;font-family:var(--font-mono)">Pending (${pending.length})</div>${pending.map(renderItem).join('')}` : '') +
+    (done.length ? `<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin:16px 0 8px;font-family:var(--font-mono)">Done (${done.length})</div>${done.map(renderItem).join('')}` : '') ||
+    '<div class="empty-state"><div class="icon">◻</div><div>No tasks. Add your first one!</div></div>';
+}
+
+function setTaskFilter(v) { state.taskFilter = v; renderTasks(); }
+function toggleTask(id) { const t = state.tasks.find(t => t.id === id); if(t) { t.done = !t.done; save(); renderTasks(); renderDashboard(); } }
+function deleteTask(id) { state.tasks = state.tasks.filter(t => t.id !== id); save(); renderTasks(); }
+
+function toggleAddTask() {
+  const f = document.getElementById('add-task-form');
+  f.style.display = f.style.display === 'none' ? 'block' : 'none';
+  updateVentureDropdowns();
+}
+
+function addTask() {
+  const text = document.getElementById('t-text').value.trim();
+  if (!text) return;
+  state.tasks.unshift({
+    id: state.nextId++,
+    text,
+    venture: document.getElementById('t-venture').value,
+    priority: document.getElementById('t-priority').value,
+    done: false,
+    due: document.getElementById('t-due').value,
+  });
+  save(); renderTasks(); renderDashboard();
+  toggleAddTask();
+  document.getElementById('t-text').value = '';
+}
+
+// ═══════════════════════════════════════════════
+// DECISIONS
+// ═══════════════════════════════════════════════
+function renderDecisions() {
+  document.getElementById('decisions-list').innerHTML = state.decisions.slice().reverse().map(d => `
+    <div class="decision-card">
+      <div class="decision-q">${d.q}</div>
+      <div class="decision-a">→ ${d.a}</div>
+      ${d.reason ? `<div style="font-size:12px;color:var(--text3);margin-bottom:8px">Because: ${d.reason}</div>` : ''}
+      <div class="decision-footer">
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="tag tag-blue">${d.venture}</span>
+          <span style="font-size:11px;color:var(--text3)">${d.date}</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select class="form-input" style="padding:4px 8px;font-size:11px;height:28px" onchange="updateOutcome(${d.id}, this.value)">
+            <option value="pending" ${d.outcome==='pending'?'selected':''}>⏳ Pending</option>
+            <option value="good" ${d.outcome==='good'?'selected':''}>✅ Good</option>
+            <option value="bad" ${d.outcome==='bad'?'selected':''}>❌ Wrong</option>
+          </select>
+          <button class="del-btn" onclick="deleteDecision(${d.id})">✕</button>
+        </div>
+      </div>
+    </div>`).join('') || '<div class="empty-state"><div class="icon">◉</div><div>No decisions logged yet.</div></div>';
+
+  // Patterns
+  const patterns = [];
+  if (state.decisions.length >= 2) patterns.push(`<div class="pattern-badge">🔁 You consistently prefer phased launches over all-at-once</div>`);
+  if (state.decisions.filter(d => d.outcome === 'good').length >= 1) patterns.push(`<div class="pattern-badge">✅ Conservative decisions have worked well for you</div>`);
+  if (state.ventures.filter(v => v.status === 'planning').length > 1) patterns.push(`<div class="pattern-badge">📋 You plan multiple ventures in parallel before executing</div>`);
+  document.getElementById('patterns-list').innerHTML = patterns.length ? patterns.join('') : '<div style="color:var(--text3);font-size:13px">Log more decisions to detect patterns automatically.</div>';
+}
+
+function updateOutcome(id, outcome) {
+  const d = state.decisions.find(d => d.id === id);
+  if (d) { d.outcome = outcome; save(); }
+}
+
+function deleteDecision(id) { state.decisions = state.decisions.filter(d => d.id !== id); save(); renderDecisions(); }
+
+function toggleAddDecision() {
+  const f = document.getElementById('add-decision-form');
+  f.style.display = f.style.display === 'none' ? 'block' : 'none';
+  updateVentureDropdowns();
+}
+
+function addDecision() {
+  const q = document.getElementById('d-q').value.trim();
+  const a = document.getElementById('d-a').value.trim();
+  if (!q || !a) return;
+  state.decisions.push({
+    id: state.nextId++,
+    q, a,
+    reason: document.getElementById('d-reason').value,
+    venture: document.getElementById('d-venture').value,
+    outcome: 'pending',
+    date: new Date().toISOString().slice(0, 10),
+  });
+  save(); renderDecisions();
+  toggleAddDecision();
+  ['d-q','d-a','d-reason'].forEach(id => document.getElementById(id).value = '');
+}
+
+// ═══════════════════════════════════════════════
+// MEMORY
+// ═══════════════════════════════════════════════
+const TAG_ICONS = { preference: '❤️', context: '🌐', constraint: '⚠️', goal: '🎯', fact: '📌' };
+
+function renderMemory() {
+  document.getElementById('memory-list').innerHTML = state.memories.map(m => `
+    <div class="memory-item">
+      <div class="memory-icon">${TAG_ICONS[m.tag] || '📝'}</div>
+      <div style="flex:1">
+        <div class="memory-text">${m.text}</div>
+        <div class="memory-meta">Added ${m.date}</div>
+      </div>
+      <span class="tag tag-purple" style="margin:0 8px">${m.tag}</span>
+      <button class="del-btn" onclick="deleteMemory(${m.id})">✕</button>
+    </div>`).join('') || '<div class="empty-state"><div class="icon">◆</div><div>No memories stored yet.</div></div>';
+}
+
+function toggleAddMemory() {
+  const f = document.getElementById('add-memory-form');
+  f.style.display = f.style.display === 'none' ? 'block' : 'none';
+}
+
+function addMemory() {
+  const text = document.getElementById('m-text').value.trim();
+  if (!text) return;
+  state.memories.push({
+    id: state.nextId++,
+    text,
+    tag: document.getElementById('m-tag').value,
+    date: new Date().toISOString().slice(0, 10),
+  });
+  save(); renderMemory();
+  toggleAddMemory();
+  document.getElementById('m-text').value = '';
+}
+
+function deleteMemory(id) { state.memories = state.memories.filter(m => m.id !== id); save(); renderMemory(); }
+
+// ═══════════════════════════════════════════════
+// HELPERS — DROPDOWNS
+// ═══════════════════════════════════════════════
+function updateVentureDropdowns() {
+  ['t-venture', 'd-venture'].forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    sel.innerHTML = '<option value="General">General</option>' +
+      state.ventures.map(v => `<option value="${v.name}">${v.name}</option>`).join('');
+  });
+}
+
+// ═══════════════════════════════════════════════
+// INSIGHTS — AI-POWERED
+// ═══════════════════════════════════════════════
+async function generateInsights() {
+  document.getElementById('insights-loading').style.display = 'block';
+  document.getElementById('insights-list').innerHTML = '';
+
+  const context = `
+User: Umar, entrepreneur in India.
+Ventures: ${JSON.stringify(state.ventures.map(v => ({ name: v.name, status: v.status, progress: v.progress + '%', next: v.next })))}
+Pending tasks: ${state.tasks.filter(t => !t.done).length}
+Decisions logged: ${state.decisions.length}
+Key memories: ${state.memories.slice(0, 4).map(m => m.text).join('; ')}
+`;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        system: `You are NEXUS, Umar's personal AI advisor. Based on his venture data, generate exactly 4 sharp, actionable business insights. Respond ONLY with a JSON array of objects with keys: icon (emoji), title (short), subtitle (category), body (2-3 sentences, India-specific, concrete numbers where possible), action (one-line call-to-action). No preamble, no markdown, pure JSON array.`,
+        messages: [{ role: 'user', content: `Generate 4 insights for this context: ${context}` }]
+      })
+    });
+    const data = await res.json();
+    const raw = data.content?.find(c => c.type === 'text')?.text || '[]';
+    const clean = raw.replace(/```json|```/g, '').trim();
+    const insights = JSON.parse(clean);
+    document.getElementById('insights-loading').style.display = 'none';
+    document.getElementById('insights-list').innerHTML = insights.map(ins => `
+      <div class="insight-card">
+        <div class="insight-header">
+          <div class="insight-icon">${ins.icon}</div>
+          <div>
+            <div class="insight-title">${ins.title}</div>
+            <div class="insight-subtitle">${ins.subtitle}</div>
+          </div>
+        </div>
+        <div class="insight-body">${ins.body}</div>
+        <div class="insight-action">→ ${ins.action}</div>
+      </div>`).join('');
+  } catch (e) {
+    document.getElementById('insights-loading').style.display = 'none';
+    // Fallback static insights
+    document.getElementById('insights-list').innerHTML = [
+      { icon: '🏢', title: 'Location is Everything for Café', subtitle: 'Café Strategy', body: 'A café near offices, colleges, or hospitals with 400–800 sqft footfall-heavy space in Tier-2 city typically achieves ₹1.5L–₹3L/month revenue within 3 months. Negotiate 3-year lease, not year-by-year — landlords give 15–20% better rates.', action: 'Visit 3 shortlisted locations this week and compare footfall at 8am, 12pm, 6pm.' },
+      { icon: '💸', title: 'Commission Leakage — Fix Now', subtitle: 'Cloud Kitchen', body: 'Swiggy/Zomato typically takes 20–30% per order. Building a 500-customer WhatsApp broadcast list and offering 10% off for direct orders can shift 30–40% of orders off-platform within 60 days. Net saving: ₹20,000–₹40,000/month.', action: 'Start WhatsApp direct order system this week before opening the café.' },
+      { icon: '📋', title: 'PMEGP Paperwork — Start Now', subtitle: 'Financing', body: 'PMEGP subsidy (15–35% of project cost) takes 60–90 days to process. For a ₹5L café, that is ₹75,000–₹1.75L back. Udyam registration (free, online, 10 minutes) is the first mandatory step before applying.', action: 'Complete Udyam registration today at udyamregistration.gov.in.' },
+      { icon: '🐔', title: 'Poultry Timing — Hold for 6 Months', subtitle: 'Poultry Farm', body: 'Broiler farming needs ₹3–5L capital and breaks even in 3–4 cycles (3 months). Starting before café stabilizes risks cash-flow crisis across both. Wait until café crosses ₹80,000/month net profit as your trigger.', action: 'Set a calendar reminder in 5 months to re-evaluate poultry farm readiness.' },
+    ].map(ins => `
+      <div class="insight-card">
+        <div class="insight-header">
+          <div class="insight-icon">${ins.icon}</div>
+          <div><div class="insight-title">${ins.title}</div><div class="insight-subtitle">${ins.subtitle}</div></div>
+        </div>
+        <div class="insight-body">${ins.body}</div>
+        <div class="insight-action">→ ${ins.action}</div>
+      </div>`).join('');
+  }
+}
+
+// ═══════════════════════════════════════════════
+// CHAT — AI-POWERED with full context
+// ═══════════════════════════════════════════════
+function buildSystemPrompt() {
+  return `You are NEXUS, Umar's highly personalised AI business advisor. You know everything about him:
+
+VENTURES: ${JSON.stringify(state.ventures)}
+ACTIVE TASKS: ${JSON.stringify(state.tasks.filter(t => !t.done).slice(0, 8))}
+DECISIONS: ${JSON.stringify(state.decisions.slice(-5))}
+MEMORIES: ${JSON.stringify(state.memories)}
+
+You are concise, direct, India-specific. You use ₹ for currency. You give practical, actionable answers tailored to his situation. You remember his preference for structured analysis with real numbers. You never give generic advice — always tie it back to his specific ventures (Cloud Kitchen, Café search, Poultry plans). Keep replies under 200 words unless specifically asked for detailed analysis. Use line breaks for readability.`;
+}
+
+const SUGGESTIONS_POOL = [
+  'What should I do first today?',
+  'How do I reduce cloud kitchen commissions?',
+  'What makes a good café location?',
+  'PMEGP subsidy process?',
+  'When should I start poultry farm?',
+  'How to get direct orders for cloud kitchen?',
+  'Café investment breakdown?',
+  'Biggest risk in my ventures right now?',
+];
+
+function renderSuggestions() {
+  const suggs = SUGGESTIONS_POOL.sort(() => Math.random() - 0.5).slice(0, 4);
+  document.getElementById('suggestions').innerHTML = suggs.map(s =>
+    `<div class="suggestion-chip" onclick="askSuggestion('${s}')">${s}</div>`).join('');
+
+  // Render existing chat
+  if (state.chatHistory.length === 0) {
+    appendMessage('ai', `Hello Umar! 👋 I'm NEXUS — your personal AI command centre. I know about your Cloud Kitchen, Café search, and Poultry plans. I'm fully context-aware and get smarter the more you interact with me.\n\nWhat would you like to work on today?`);
+  } else {
+    state.chatHistory.forEach(m => appendMessage(m.role, m.content, false));
+    scrollChat();
+  }
+}
+
+function askSuggestion(text) {
+  document.getElementById('chat-input').value = text;
+  sendMessage();
+}
+
+function appendMessage(role, text, scroll = true) {
+  const container = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.className = `message ${role}`;
+  div.innerHTML = `
+    <div class="message-avatar ${role}-avatar">${role === 'ai' ? '✦' : 'U'}</div>
+    <div class="message-bubble ${role}-bubble">${text.replace(/\n/g, '<br>')}</div>`;
+  container.appendChild(div);
+  if (scroll) scrollChat();
+}
+
+function scrollChat() {
+  const c = document.getElementById('chat-messages');
+  c.scrollTop = c.scrollHeight;
+}
+
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+}
+
+async function sendMessage() {
+  const input = document.getElementById('chat-input');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+
+  appendMessage('user', text);
+  state.chatHistory.push({ role: 'user', content: text });
+
+  // Typing indicator
+  const container = document.getElementById('chat-messages');
+  const typing = document.createElement('div');
+  typing.className = 'message ai';
+  typing.id = 'typing';
+  typing.innerHTML = `<div class="message-avatar ai-avatar">✦</div><div class="message-bubble ai-bubble"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>`;
+  container.appendChild(typing);
+  scrollChat();
+
+  try {
+    const messages = state.chatHistory.map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.content }));
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        system: buildSystemPrompt(),
+        messages,
+      })
+    });
+    const data = await res.json();
+    const reply = data.content?.find(c => c.type === 'text')?.text || 'Sorry, something went wrong.';
+    document.getElementById('typing')?.remove();
+    appendMessage('ai', reply);
+    state.chatHistory.push({ role: 'ai', content: reply });
+    if (state.chatHistory.length > 30) state.chatHistory = state.chatHistory.slice(-30);
+    save();
+    renderSuggestions_chips();
+  } catch (e) {
+    document.getElementById('typing')?.remove();
+    appendMessage('ai', 'Connection error. Please check your internet and try again.');
+  }
+}
+
+function renderSuggestions_chips() {
+  const suggs = SUGGESTIONS_POOL.sort(() => Math.random() - 0.5).slice(0, 4);
+  document.getElementById('suggestions').innerHTML = suggs.map(s =>
+    `<div class="suggestion-chip" onclick="askSuggestion('${s}')">${s}</div>`).join('');
+}
+
+// ═══════════════════════════════════════════════
+// SETUP MODAL
+// ═══════════════════════════════════════════════
+function showSetup() { document.getElementById('setup-modal').style.display = 'flex'; }
+function hideSetup() { document.getElementById('setup-modal').style.display = 'none'; }
+
+async function saveSetup() {
+  const apiKey = document.getElementById('setup-apikey').value.trim();
+  const binId = document.getElementById('setup-binid').value.trim();
+  const err = document.getElementById('setup-error');
+  const btn = document.getElementById('setup-btn');
+  err.textContent = '';
+  if (!apiKey) { err.textContent = 'Please enter your JSONBin Master Key.'; return; }
+
+  if (!binId) {
+    btn.textContent = 'Creating your bin...';
+    try {
+      const res = await fetch('https://api.jsonbin.io/v3/b', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Master-Key': apiKey, 'X-Bin-Name': 'nexus-umar', 'X-Bin-Private': 'true' },
+        body: JSON.stringify(state)
+      });
+      btn.textContent = 'Save & Connect';
+      if (!res.ok) { err.textContent = 'Invalid API key or connection error. Check and try again.'; return; }
+      const data = await res.json();
+      syncConfig = { apiKey, binId: data.metadata.id };
+      saveCfg();
+      document.getElementById('setup-binid-display').textContent = data.metadata.id;
+      document.getElementById('setup-binid-section').style.display = 'block';
+      setSyncStatus('saved');
+      setTimeout(() => { hideSetup(); renderAll(); }, 2000);
+    } catch(e) { err.textContent = 'Network error. Try again.'; btn.textContent = 'Save & Connect'; }
+  } else {
+    syncConfig = { apiKey, binId };
+    const ok = await cloudLoad();
+    if (ok) { saveCfg(); hideSetup(); renderAll(); }
+    else { err.textContent = 'Could not load data. Check your Bin ID and Key.'; syncConfig = {}; }
+  }
+}
+
+function renderAll() { renderDashboard(); updateVentureDropdowns(); }
+
+// ═══════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════
+async function init() {
+  if (syncConfig.binId && syncConfig.apiKey) {
+    setSyncStatus('loading');
+    const ok = await cloudLoad();
+    if (ok) { renderAll(); return; }
+  } else {
+    setSyncStatus('offline');
+  }
+  renderAll();
+}
+
+init();
+</script>
+
+<!-- SETUP MODAL -->
+<div id="setup-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:9999;align-items:center;justify-content:center;padding:20px">
+  <div style="background:#0e0e1a;border:1px solid rgba(120,120,255,0.3);border-radius:14px;padding:32px;max-width:480px;width:100%;box-shadow:0 0 60px rgba(108,99,255,0.25)">
+    <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;margin-bottom:8px">☁️ Enable Cloud Sync</div>
+    <div style="font-size:13px;color:#9999bb;margin-bottom:24px;line-height:1.6">Your data will sync across all devices — phone, laptop, anywhere. Uses <strong style="color:#e8e8f0">JSONBin.io</strong> (free, private, takes 2 minutes).</div>
+
+    <div style="background:#14141f;border:1px solid rgba(120,120,255,0.12);border-radius:10px;padding:16px;margin-bottom:20px;font-size:13px;line-height:2">
+      <div style="font-weight:600;margin-bottom:6px;color:#a78bfa">📋 Step-by-step</div>
+      <div>1. Go to <a href="https://jsonbin.io" target="_blank" style="color:#38bdf8">jsonbin.io</a> &rarr; Sign up free</div>
+      <div>2. Click your profile icon &rarr; <strong style="color:#e8e8f0">API Keys</strong></div>
+      <div>3. Copy your <strong style="color:#e8e8f0">Master Key</strong> and paste below</div>
+      <div>4. Leave Bin ID blank — I'll create it automatically ✅</div>
+    </div>
+
+    <div style="margin-bottom:14px">
+      <div style="font-size:12px;color:#9999bb;margin-bottom:6px">Master Key (from JSONBin.io)</div>
+      <input id="setup-apikey" style="width:100%;background:#14141f;border:1px solid rgba(120,120,255,0.2);border-radius:8px;padding:10px 14px;color:#e8e8f0;font-size:13px;outline:none" placeholder="$2a$10$..." type="password" />
+    </div>
+    <div style="margin-bottom:14px">
+      <div style="font-size:12px;color:#9999bb;margin-bottom:6px">Bin ID <span style="color:#5555aa">(leave blank for first-time — recommended)</span></div>
+      <input id="setup-binid" style="width:100%;background:#14141f;border:1px solid rgba(120,120,255,0.2);border-radius:8px;padding:10px 14px;color:#e8e8f0;font-size:13px;outline:none" placeholder="Leave blank to auto-create" />
+    </div>
+
+    <div id="setup-binid-section" style="display:none;background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.2);border-radius:8px;padding:14px;margin-bottom:14px;font-size:12px;line-height:1.8">
+      ✅ <strong>Bin created!</strong> Save this ID to reconnect on other devices:<br>
+      <strong id="setup-binid-display" style="color:#34d399;font-family:'DM Mono',monospace;word-break:break-all"></strong>
+    </div>
+
+    <div id="setup-error" style="color:#f87171;font-size:12px;margin-bottom:12px;min-height:16px"></div>
+
+    <div style="display:flex;gap:10px">
+      <button id="setup-btn" onclick="saveSetup()" style="flex:1;padding:11px;background:#6c63ff;color:white;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">Save &amp; Connect</button>
+      <button onclick="hideSetup()" style="padding:11px 20px;background:#1a1a2e;color:#9999bb;border:1px solid rgba(120,120,255,0.15);border-radius:8px;font-size:13px;cursor:pointer">Skip</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

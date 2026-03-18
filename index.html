@@ -479,9 +479,74 @@
 
   .empty-state { text-align: center; padding: 48px 24px; color: var(--text3); font-size: 14px; }
   .empty-state .icon { font-size: 40px; margin-bottom: 12px; }
+
+  /* ── LOGIN SCREEN ── */
+  #login-screen {
+    position: fixed; inset: 0; z-index: 9999;
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #login-screen.hidden { display: none; }
+  .login-box {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: var(--radius);
+    padding: 40px 36px;
+    width: 340px;
+    box-shadow: var(--glow);
+  }
+  .login-logo {
+    width: 44px; height: 44px;
+    background: linear-gradient(135deg, var(--accent), var(--accent3));
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-display);
+    font-weight: 800; font-size: 18px; color: white;
+    margin: 0 auto 20px;
+    box-shadow: 0 0 20px rgba(108,99,255,0.4);
+  }
+  .login-title {
+    font-family: var(--font-display);
+    font-size: 20px; font-weight: 700;
+    text-align: center; margin-bottom: 6px;
+  }
+  .login-sub { font-size: 13px; color: var(--text2); text-align: center; margin-bottom: 28px; }
+  .login-input {
+    width: 100%; background: var(--bg3);
+    border: 1px solid var(--border2);
+    border-radius: var(--radius-sm);
+    padding: 11px 14px; color: var(--text);
+    font-size: 14px; font-family: var(--font-body);
+    outline: none; margin-bottom: 12px;
+    transition: border-color 0.2s;
+  }
+  .login-input:focus { border-color: var(--accent); }
+  .login-btn {
+    width: 100%; padding: 12px;
+    background: var(--accent); color: white;
+    border: none; border-radius: var(--radius-sm);
+    font-size: 14px; font-weight: 600;
+    font-family: var(--font-body);
+    cursor: pointer; transition: opacity 0.2s;
+  }
+  .login-btn:hover { opacity: 0.85; }
+  .login-error { color: var(--red); font-size: 12px; text-align: center; margin-top: 10px; min-height: 16px; }
 </style>
 </head>
 <body>
+
+<!-- LOGIN SCREEN -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-logo">N</div>
+    <div class="login-title">NEXUS</div>
+    <div class="login-sub">Enter your password to continue</div>
+    <input id="login-pass" class="login-input" type="password" placeholder="Password" autocomplete="current-password"
+      onkeydown="if(event.key==='Enter')doLogin()" />
+    <button class="login-btn" onclick="doLogin()">Unlock</button>
+    <div class="login-error" id="login-error"></div>
+  </div>
+</div>
 
 <div class="app">
   <!-- SIDEBAR (desktop) -->
@@ -712,6 +777,36 @@
 </div>
 
 <script>
+// ═══════════════════════════════════════════════
+// AUTH — SHA-256 hash injected at deploy time
+// ═══════════════════════════════════════════════
+const _PH = '__PASSWORD_HASH__';
+
+async function sha256(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function doLogin() {
+  const pass = document.getElementById('login-pass').value;
+  const err = document.getElementById('login-error');
+  if (!pass) { err.textContent = 'Please enter your password.'; return; }
+  const hash = await sha256(pass);
+  if (hash === _PH) {
+    sessionStorage.setItem('nexus_auth', _PH);
+    document.getElementById('login-screen').classList.add('hidden');
+  } else {
+    err.textContent = 'Incorrect password.';
+    document.getElementById('login-pass').value = '';
+  }
+}
+
+(function checkAuth() {
+  if (sessionStorage.getItem('nexus_auth') === _PH) {
+    document.getElementById('login-screen').classList.add('hidden');
+  }
+})();
+
 // ═══════════════════════════════════════════════
 // CLOUD SYNC — JSONBin.io + localStorage fallback
 // ═══════════════════════════════════════════════

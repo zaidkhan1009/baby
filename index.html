@@ -475,6 +475,14 @@
     transform: translateY(-50%);
   }
 
+  /* ── NUDGES ── */
+  .nudge-card { background: var(--bg2); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius); padding: 11px 14px; display: flex; align-items: center; gap: 10px; font-size: 13px; line-height: 1.4; }
+  .nudge-card.warning { border-left-color: #fb923c; }
+  .nudge-card.action  { border-left-color: #34d399; }
+  .nudge-icon { font-size: 14px; flex-shrink: 0; }
+  .nudge-dismiss { margin-left: auto; background: none; border: none; color: var(--text3); cursor: pointer; font-size: 16px; padding: 2px 6px; border-radius: 4px; flex-shrink: 0; }
+  .nudge-dismiss:hover { color: var(--text1); background: var(--surface); }
+
   /* ── AGENTS PAGE ── */
   .agent-card {
     background: var(--bg2); border: 1px solid var(--border);
@@ -645,6 +653,15 @@
         <div class="greeting">
           <h1 id="greeting-text">Good morning, Umar 👋</h1>
           <p id="greeting-sub">Here's your command centre overview for today.</p>
+        </div>
+
+        <!-- NEXUS Proactive Nudges -->
+        <div id="nudges-section" style="margin-bottom:20px;display:none">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <div style="font-size:11px;font-family:var(--font-mono);color:var(--text3);letter-spacing:1px">◈ NEXUS PROACTIVE</div>
+            <button class="btn btn-ghost btn-sm" onclick="generateNudges()" id="nudge-refresh-btn">↻ Refresh</button>
+          </div>
+          <div id="nudges-list" style="display:flex;flex-direction:column;gap:8px"></div>
         </div>
 
         <div class="stat-row" id="stat-row"></div>
@@ -1053,7 +1070,65 @@ updateClock();
 // ═══════════════════════════════════════════════
 // DASHBOARD
 // ═══════════════════════════════════════════════
+// ═══════════════════════════════════════════════
+// NUDGES — proactive dashboard intelligence
+// ═══════════════════════════════════════════════
+const NUDGE_ICONS = { info: '◈', warning: '⚠', action: '→' };
+const NUDGE_LAST_GEN_KEY = 'nexus_nudge_gen';
+
+async function loadNudges() {
+  try {
+    const res = await fetch(`${NEXUS_WORKER_URL}/nudges`);
+    const { nudges } = await res.json();
+    if (nudges?.length) {
+      renderNudgeCards(nudges);
+    } else {
+      // Auto-generate if none exist or last gen > 30 min ago
+      const last = parseInt(localStorage.getItem(NUDGE_LAST_GEN_KEY) || '0');
+      if (Date.now() - last > 30 * 60 * 1000) generateNudges();
+    }
+  } catch { /* worker offline, skip silently */ }
+}
+
+async function generateNudges() {
+  const btn = document.getElementById('nudge-refresh-btn');
+  if (btn) btn.textContent = '...';
+  try {
+    const res = await fetch(`${NEXUS_WORKER_URL}/nudges/generate`, { method: 'POST' });
+    const { nudges } = await res.json();
+    localStorage.setItem(NUDGE_LAST_GEN_KEY, Date.now());
+    renderNudgeCards(nudges || []);
+  } catch { /* silent fail */ }
+  finally { if (btn) btn.textContent = '↻ Refresh'; }
+}
+
+function renderNudgeCards(nudges) {
+  const section = document.getElementById('nudges-section');
+  const list = document.getElementById('nudges-list');
+  if (!nudges?.length) { section.style.display = 'none'; return; }
+  section.style.display = 'block';
+  list.innerHTML = nudges.map(n => `
+    <div class="nudge-card ${n.type}" id="nudge-${n.id}">
+      <span class="nudge-icon">${NUDGE_ICONS[n.type] || '◈'}</span>
+      <span>${n.text}</span>
+      <button class="nudge-dismiss" onclick="dismissNudge(${n.id})" title="Dismiss">×</button>
+    </div>`).join('');
+}
+
+async function dismissNudge(id) {
+  document.getElementById(`nudge-${id}`)?.remove();
+  const remaining = document.querySelectorAll('[id^="nudge-"]').length;
+  if (!remaining) document.getElementById('nudges-section').style.display = 'none';
+  try {
+    await fetch(`${NEXUS_WORKER_URL}/nudges/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dismissed: true }),
+    });
+  } catch { /* silent */ }
+}
+
 function renderDashboard() {
+  loadNudges();
   // Stats
   const pending = state.tasks.filter(t => !t.done).length;
   const done = state.tasks.filter(t => t.done).length;

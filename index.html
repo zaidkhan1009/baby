@@ -7,6 +7,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>NEXUS — Umar's AI Command Centre</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<meta name="apple-mobile-web-app-title" content="NEXUS">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
@@ -475,6 +478,16 @@
     transform: translateY(-50%);
   }
 
+  /* ── VOICE ── */
+  .mic-btn { width: 36px; height: 36px; border-radius: 50%; background: var(--surface); border: 1px solid var(--border); color: var(--text2); cursor: pointer; display: none; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.2s; font-size: 15px; }
+  .mic-btn:hover { background: var(--bg2); color: var(--text1); }
+  .mic-btn.recording { background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.4); color: #ef4444; animation: mic-pulse 1.2s ease-in-out infinite; }
+  @keyframes mic-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.3); } 50% { box-shadow: 0 0 0 6px rgba(239,68,68,0); } }
+
+  /* ── PWA INSTALL ── */
+  .install-banner { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 12px 20px; display: flex; align-items: center; gap: 12px; font-size: 13px; z-index: 9999; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+  .install-banner button { background: var(--accent); border: none; color: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; }
+
   /* ── NUDGES ── */
   .nudge-card { background: var(--bg2); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius); padding: 11px 14px; display: flex; align-items: center; gap: 10px; font-size: 13px; line-height: 1.4; }
   .nudge-card.warning { border-left-color: #fb923c; }
@@ -692,6 +705,7 @@
             <div class="input-row">
               <textarea class="chat-input" id="chat-input" placeholder="Ask anything about your business..." rows="1"
                 onkeydown="handleKey(event)"></textarea>
+              <button class="mic-btn" id="mic-btn" title="Voice input">🎙</button>
               <button class="send-btn" onclick="sendMessage()">➤</button>
             </div>
           </div>
@@ -1709,6 +1723,75 @@ async function init() {
   const ok = await cloudLoad();
   if (!ok) setSyncStatus('offline');
   renderAll();
+  initVoice();
+  initPWA();
+  registerSW();
+}
+
+// ═══════════════════════════════════════════════
+// VOICE INPUT
+// ═══════════════════════════════════════════════
+function initVoice() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const btn = document.getElementById('mic-btn');
+  if (!SR || !btn) return;
+
+  btn.style.display = 'flex';
+  const rec = new SR();
+  rec.continuous = false;
+  rec.interimResults = true;
+  rec.lang = 'en-IN';
+  let active = false;
+
+  btn.addEventListener('click', () => active ? rec.stop() : rec.start());
+
+  rec.onstart = () => { active = true;  btn.classList.add('recording'); btn.title = 'Listening… click to stop'; };
+  rec.onend   = () => {
+    active = false;
+    btn.classList.remove('recording');
+    btn.title = 'Voice input';
+    if (document.getElementById('chat-input').value.trim()) sendMessage();
+  };
+  rec.onresult = e => {
+    document.getElementById('chat-input').value =
+      Array.from(e.results).map(r => r[0].transcript).join('');
+  };
+  rec.onerror = () => { active = false; btn.classList.remove('recording'); };
+}
+
+// ═══════════════════════════════════════════════
+// PWA INSTALL PROMPT
+// ═══════════════════════════════════════════════
+let _deferredInstall = null;
+function initPWA() {
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault();
+    _deferredInstall = e;
+    // Show install banner
+    const banner = document.createElement('div');
+    banner.className = 'install-banner';
+    banner.id = 'install-banner';
+    banner.innerHTML = `<span>✦ Install NEXUS as an app</span>
+      <button onclick="installPWA()">Install</button>
+      <button onclick="document.getElementById('install-banner').remove()" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:18px;padding:0 4px">×</button>`;
+    document.body.appendChild(banner);
+  });
+}
+async function installPWA() {
+  if (!_deferredInstall) return;
+  _deferredInstall.prompt();
+  await _deferredInstall.userChoice;
+  _deferredInstall = null;
+  document.getElementById('install-banner')?.remove();
+}
+
+// ═══════════════════════════════════════════════
+// SERVICE WORKER
+// ═══════════════════════════════════════════════
+function registerSW() {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/baby/sw.js').catch(() => {});
+  }
 }
 
 init();

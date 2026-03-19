@@ -1,0 +1,14 @@
+{
+  "name": "NEXUS — Personal AI",
+  "short_name": "NEXUS",
+  "description": "Your personal AI command centre",
+  "start_url": "/baby/",
+  "scope": "/baby/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#0d0d14",
+  "background_color": "#0d0d14",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

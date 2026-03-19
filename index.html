@@ -475,6 +475,21 @@
     transform: translateY(-50%);
   }
 
+  /* ── AGENTS PAGE ── */
+  .agent-card {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px 20px;
+    display: flex; align-items: center; gap: 16px; transition: border-color 0.2s;
+  }
+  .agent-card:hover { border-color: var(--border2); }
+  .agent-icon { width: 42px; height: 42px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+  .agent-name { font-size: 14px; font-weight: 700; }
+  .agent-desc { font-size: 12px; color: var(--text2); margin-top: 3px; line-height: 1.5; }
+  .agent-tools { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
+  .agent-tool-tag { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--surface); color: var(--text3); font-family: var(--font-mono); }
+  /* Agent badge in chat bubble */
+  .agent-badge { font-size: 10px; font-family: var(--font-mono); font-weight: 600; margin-bottom: 5px; display: block; letter-spacing: 0.5px; }
+
   /* ── TOOLS PAGE ── */
   .tool-card {
     background: var(--bg2); border: 1px solid var(--border);
@@ -600,6 +615,9 @@
     </div>
     <div class="nav-item" onclick="navigate('tools')" data-page="tools" data-tip="Tools">
       <span>⚙</span><span class="nav-label">Tools</span>
+    </div>
+    <div class="nav-item" onclick="navigate('agents')" data-page="agents" data-tip="Agents">
+      <span>◈</span><span class="nav-label">Agents</span>
     </div>
     <div class="toggle-sidebar" onclick="toggleSidebar()" data-tip="Expand">
       <span id="toggle-icon">▶</span>
@@ -789,6 +807,24 @@
         <div id="insights-list"></div>
       </div>
 
+      <!-- ══ AGENTS ══ -->
+      <div class="page" id="page-agents">
+        <div class="section-header">
+          <div class="section-title">Agent Studio</div>
+          <button class="btn btn-primary btn-sm" onclick="renderAgents()">↻ Refresh</button>
+        </div>
+        <p style="font-size:13px;color:var(--text2);margin-bottom:20px;line-height:1.6">
+          NEXUS automatically routes your message to the best agent. Each agent has its own personality, expertise and toolset.
+        </p>
+        <div id="agents-loading" class="empty-state" style="display:none">
+          <div class="typing-indicator" style="justify-content:center;margin-bottom:12px">
+            <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
+          </div>
+          Loading agents...
+        </div>
+        <div id="agents-list" style="display:flex;flex-direction:column;gap:10px"></div>
+      </div>
+
       <!-- ══ TOOLS ══ -->
       <div class="page" id="page-tools">
         <div class="section-header">
@@ -970,7 +1006,7 @@ let state = load();
 // ═══════════════════════════════════════════════
 // NAVIGATION
 // ═══════════════════════════════════════════════
-const PAGE_TITLES = { dashboard:'Dashboard', chat:'AI Chat', ventures:'Ventures', tasks:'Tasks', decisions:'Decision Journal', memory:'Memory Bank', insights:'Insights', tools:'Tools & Skills' };
+const PAGE_TITLES = { dashboard:'Dashboard', chat:'AI Chat', ventures:'Ventures', tasks:'Tasks', decisions:'Decision Journal', memory:'Memory Bank', insights:'Insights', tools:'Tools & Skills', agents:'Agent Studio' };
 
 function navigate(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -987,6 +1023,7 @@ function navigate(page) {
   if (page === 'insights') generateInsights();
   if (page === 'chat') renderSuggestions();
   if (page === 'tools') renderTools();
+  if (page === 'agents') renderAgents();
 }
 
 let sidebarExpanded = false;
@@ -1404,13 +1441,16 @@ function askSuggestion(text) {
   sendMessage();
 }
 
-function appendMessage(role, text, scroll = true) {
+function appendMessage(role, text, scroll = true, agent = null) {
   const container = document.getElementById('chat-messages');
   const div = document.createElement('div');
   div.className = `message ${role}`;
+  const icon = agent ? agent.icon : (role === 'ai' ? '✦' : 'U');
+  const avatarStyle = agent ? `style="background:${agent.color}22;color:${agent.color};border:1px solid ${agent.color}44"` : '';
+  const badge = agent ? `<span class="agent-badge" style="color:${agent.color}">${agent.name.toUpperCase()}</span>` : '';
   div.innerHTML = `
-    <div class="message-avatar ${role}-avatar">${role === 'ai' ? '✦' : 'U'}</div>
-    <div class="message-bubble ${role}-bubble">${text.replace(/\n/g, '<br>')}</div>`;
+    <div class="message-avatar ${role}-avatar" ${avatarStyle}>${icon}</div>
+    <div class="message-bubble ${role}-bubble">${badge}${text.replace(/\n/g, '<br>')}</div>`;
   container.appendChild(div);
   if (scroll) scrollChat();
 }
@@ -1437,7 +1477,7 @@ async function sendMessage() {
   const typing = document.createElement('div');
   typing.className = 'message ai';
   typing.id = 'typing';
-  typing.innerHTML = `<div class="message-avatar ai-avatar">✦</div><div class="message-bubble ai-bubble"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>`;
+  typing.innerHTML = `<div class="message-avatar ai-avatar">✦</div><div class="message-bubble ai-bubble"><span style="font-size:10px;color:var(--text3);font-family:var(--font-mono);display:block;margin-bottom:6px">ROUTING...</span><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>`;
   container.appendChild(typing);
   scrollChat();
 
@@ -1450,7 +1490,7 @@ async function sendMessage() {
     const data = await res.json();
     const reply = data.text || 'Sorry, something went wrong.';
     document.getElementById('typing')?.remove();
-    appendMessage('ai', reply);
+    appendMessage('ai', reply, true, data.agent || null);
     renderSuggestions_chips();
   } catch (e) {
     document.getElementById('typing')?.remove();
@@ -1471,6 +1511,52 @@ function showSetup() { document.getElementById('setup-modal').style.display = 'f
 function hideSetup() { document.getElementById('setup-modal').style.display = 'none'; }
 
 function renderAll() { renderDashboard(); updateVentureDropdowns(); }
+
+// ═══════════════════════════════════════════════
+// AGENTS PAGE
+// ═══════════════════════════════════════════════
+const AGENT_TOOL_LABELS = { calculate:'Calculator', get_datetime:'Date & Time', fetch_url:'Fetch URL', save_note:'Save Note', get_notes:'Get Notes', web_search:'Web Search' };
+
+async function renderAgents() {
+  const list = document.getElementById('agents-list');
+  const loading = document.getElementById('agents-loading');
+  list.innerHTML = '';
+  loading.style.display = 'flex';
+  try {
+    const res = await fetch(`${NEXUS_WORKER_URL}/agents`);
+    const { agents } = await res.json();
+    loading.style.display = 'none';
+    if (!agents?.length) { list.innerHTML = '<div class="empty-state"><div>No agents found. Run the Phase 4 SQL in Supabase.</div></div>'; return; }
+    list.innerHTML = agents.map(a => `
+      <div class="agent-card">
+        <div class="agent-icon" style="background:${a.color}22;color:${a.color};border:1px solid ${a.color}33">${a.icon}</div>
+        <div style="flex:1">
+          <div class="agent-name">${a.name.charAt(0).toUpperCase() + a.name.slice(1)}</div>
+          <div class="agent-desc">${a.description}</div>
+          <div class="agent-tools">
+            ${(a.tools || []).map(t => `<span class="agent-tool-tag">${AGENT_TOOL_LABELS[t] || t}</span>`).join('')}
+          </div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" ${a.enabled ? 'checked' : ''} onchange="toggleAgent('${a.name}', this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>`).join('');
+  } catch (e) {
+    loading.style.display = 'none';
+    list.innerHTML = '<div class="empty-state"><div>Could not load agents. Check Worker connection.</div></div>';
+  }
+}
+
+async function toggleAgent(name, enabled) {
+  try {
+    await fetch(`${NEXUS_WORKER_URL}/agents/${name}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+  } catch (e) { console.error('Failed to update agent:', e); }
+}
 
 // ═══════════════════════════════════════════════
 // TOOLS PAGE

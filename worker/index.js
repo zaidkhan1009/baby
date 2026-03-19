@@ -3,6 +3,7 @@
 // AI:     Groq — llama-3.3-70b-versatile (free)
 // Memory: Supabase — messages, facts, app_state
 // Tools:  datetime, calculate, fetch_url, notes, web_search
+// Agents: advisor, planner, researcher, analyst
 //
 // Secrets (wrangler secret put <NAME>):
 //   GROQ_API_KEY
@@ -27,15 +28,18 @@ export default {
 
     const url = new URL(request.url);
     const m = request.method;
+    const p = url.pathname;
 
-    if (m === 'POST' && url.pathname === '/chat')          return handleChat(request, env);
-    if (m === 'POST' && url.pathname === '/insights')      return handleInsights(request, env);
-    if (m === 'GET'  && url.pathname === '/history')       return handleHistory(request, env);
-    if (m === 'POST' && url.pathname === '/history/clear') return handleHistoryClear(request, env);
-    if (m === 'POST' && url.pathname === '/state')         return handleStateSave(request, env);
-    if (m === 'GET'  && url.pathname === '/state')         return handleStateLoad(request, env);
-    if (m === 'GET'  && url.pathname === '/tools')         return handleToolsList(request, env);
-    if (m === 'PATCH'&& url.pathname.startsWith('/tools/'))return handleToolUpdate(request, env, url.pathname.split('/')[2]);
+    if (m === 'POST'  && p === '/chat')            return handleChat(request, env);
+    if (m === 'POST'  && p === '/insights')        return handleInsights(request, env);
+    if (m === 'GET'   && p === '/history')         return handleHistory(request, env);
+    if (m === 'POST'  && p === '/history/clear')   return handleHistoryClear(request, env);
+    if (m === 'POST'  && p === '/state')           return handleStateSave(request, env);
+    if (m === 'GET'   && p === '/state')           return handleStateLoad(request, env);
+    if (m === 'GET'   && p === '/tools')           return handleToolsList(request, env);
+    if (m === 'PATCH' && p.startsWith('/tools/'))  return handleToolUpdate(request, env, p.split('/')[2]);
+    if (m === 'GET'   && p === '/agents')          return handleAgentsList(request, env);
+    if (m === 'PATCH' && p.startsWith('/agents/')) return handleAgentUpdate(request, env, p.split('/')[2]);
 
     return new Response('Not found', { status: 404 });
   }
@@ -77,12 +81,41 @@ async function saveFacts(env, facts) {
 }
 
 async function loadEnabledTools(env) {
-  const res = await sb(env, 'tools?enabled=eq.true&order=name.asc');
+  const res = await sb(env, 'tools?enabled=eq.true');
   if (!res.ok) return [];
   return res.json();
 }
 
-// ── Tool definitions (Groq function calling format) ──
+// ── Agent routing ─────────────────────────────────
+function classifyIntent(message) {
+  const m = message.toLowerCase();
+  if (/\b(plan|steps|roadmap|action plan|how do i|break.?down|strategy for|what should i do first|guide me)\b/.test(m)) return 'planner';
+  if (/\b(search|look up|find out|research|what is|what are|current price|latest news|tell me about|who is)\b/.test(m)) return 'researcher';
+  if (/\b(analys|analyse|profit|revenue|financ|numbers|calculate my|compare|trend|how much|roi|margin|breakdown of)\b/.test(m)) return 'analyst';
+  return 'advisor';
+}
+
+const AGENT_FALLBACKS = {
+  advisor:    { name: 'advisor',    icon: '◎', color: '#6c63ff', system_prompt: null, tools: [] },
+  planner:    { name: 'planner',    icon: '◈', color: '#38bdf8', system_prompt: null, tools: [] },
+  researcher: { name: 'researcher', icon: '◐', color: '#34d399', system_prompt: null, tools: [] },
+  analyst:    { name: 'analyst',    icon: '◉', color: '#fb923c', system_prompt: null, tools: [] },
+};
+
+async function loadAgent(env, name) {
+  try {
+    const res = await sb(env, `agents?name=eq.${name}&enabled=eq.true`, {
+      headers: { 'Prefer': 'return=representation' },
+    });
+    if (!res.ok) return AGENT_FALLBACKS[name] || AGENT_FALLBACKS.advisor;
+    const rows = await res.json();
+    return rows[0] || AGENT_FALLBACKS[name] || AGENT_FALLBACKS.advisor;
+  } catch {
+    return AGENT_FALLBACKS[name] || AGENT_FALLBACKS.advisor;
+  }
+}
+
+// ── Tool definitions ──────────────────────────────
 const TOOL_DEFS = {
   get_datetime: {
     type: 'function',
@@ -99,9 +132,7 @@ const TOOL_DEFS = {
       description: 'Evaluate a mathematical expression. Use for calculations, percentages, financial projections.',
       parameters: {
         type: 'object',
-        properties: {
-          expression: { type: 'string', description: 'Math expression, e.g. "15% of 50000" or "(120000 - 40000) / 12"' },
-        },
+        properties: { expression: { type: 'string', description: 'Math expression e.g. "15% of 50000"' } },
         required: ['expression'],
       },
     },
@@ -113,7 +144,7 @@ const TOOL_DEFS = {
       description: 'Fetch and read content from a URL.',
       parameters: {
         type: 'object',
-        properties: { url: { type: 'string', description: 'The full URL to fetch' } },
+        properties: { url: { type: 'string' } },
         required: ['url'],
       },
     },
@@ -125,7 +156,7 @@ const TOOL_DEFS = {
       description: 'Save a note, reminder or important information for later retrieval.',
       parameters: {
         type: 'object',
-        properties: { content: { type: 'string', description: 'The note to save' } },
+        properties: { content: { type: 'string' } },
         required: ['content'],
       },
     },
@@ -145,7 +176,7 @@ const TOOL_DEFS = {
       description: 'Search the web for current information, news, prices, or facts.',
       parameters: {
         type: 'object',
-        properties: { query: { type: 'string', description: 'Search query' } },
+        properties: { query: { type: 'string' } },
         required: ['query'],
       },
     },
@@ -169,7 +200,7 @@ function calculate(expression) {
     const result = Function('"use strict"; return (' + safe + ')')();
     return { expression, result };
   } catch {
-    return { error: 'Could not evaluate expression', expression };
+    return { error: 'Could not evaluate', expression };
   }
 }
 
@@ -224,7 +255,7 @@ async function executeTool(env, name, args) {
   }
 }
 
-// ── Groq call with optional tool support ─────────
+// ── Groq call ─────────────────────────────────────
 async function callGroq(env, messages, tools = []) {
   const body = {
     model: 'llama-3.3-70b-versatile',
@@ -244,30 +275,42 @@ async function callGroq(env, messages, tools = []) {
   return res.json();
 }
 
-// ── /chat  (agentic loop) ─────────────────────────
+// ── /chat  (multi-agent agentic loop) ────────────
 async function handleChat(request, env) {
   try {
     const { message, systemPrompt } = await request.json();
 
-    const [history, facts, enabledTools] = await Promise.all([
+    // Classify intent → pick agent, load data in parallel
+    const agentName = classifyIntent(message);
+    const [history, facts, agent, enabledTools] = await Promise.all([
       loadMessages(env, 30),
       loadFacts(env),
+      loadAgent(env, agentName),
       loadEnabledTools(env),
     ]);
 
+    // Enrich prompt with facts
     const factsBlock = facts.length
       ? `\n\nKNOWN FACTS ABOUT UMAR:\n${facts.map(f => `- [${f.tag}] ${f.text}`).join('\n')}`
       : '';
 
+    // Use agent's own system prompt if available, else fall back to frontend's
+    const agentPrompt = (agent.system_prompt || systemPrompt) + factsBlock;
+
+    // Filter tools to those the agent is allowed to use
+    const agentToolNames = agent.tools || [];
+    const tools = enabledTools
+      .filter(t => !agentToolNames.length || agentToolNames.includes(t.name))
+      .map(t => TOOL_DEFS[t.name])
+      .filter(Boolean);
+
     const messages = [
-      { role: 'system', content: systemPrompt + factsBlock },
+      { role: 'system', content: agentPrompt },
       ...history.map(m => ({ role: m.role, content: m.content })),
       { role: 'user', content: message },
     ];
 
-    const tools = enabledTools.map(t => TOOL_DEFS[t.name]).filter(Boolean);
-
-    // Agentic loop — up to 5 tool call rounds
+    // Agentic loop — up to 5 tool rounds
     let reply = '';
     for (let i = 0; i < 5; i++) {
       const res = await callGroq(env, messages, tools);
@@ -290,7 +333,10 @@ async function handleChat(request, env) {
     await saveMessage(env, 'assistant', reply);
     extractAndSaveFacts(env, message, reply).catch(() => {});
 
-    return json({ text: reply });
+    return json({
+      text: reply,
+      agent: { name: agent.name, icon: agent.icon, color: agent.color },
+    });
   } catch (e) {
     return json({ error: e.message }, 500);
   }
@@ -305,7 +351,6 @@ async function handleHistory(request, env) {
   }
 }
 
-// ── /history/clear ────────────────────────────────
 async function handleHistoryClear(request, env) {
   try {
     await sb(env, 'messages?id=gt.0', { method: 'DELETE' });
@@ -358,7 +403,7 @@ async function handleStateLoad(request, env) {
 // ── /tools ────────────────────────────────────────
 async function handleToolsList(request, env) {
   try {
-    const res = await sb(env, 'tools?order=builtin.desc,name.asc', { headers: { 'Prefer': 'return=representation' } });
+    const res = await sb(env, 'tools?order=name.asc', { headers: { 'Prefer': 'return=representation' } });
     if (!res.ok) return json({ tools: [] });
     return json({ tools: await res.json() });
   } catch (e) {
@@ -368,8 +413,27 @@ async function handleToolsList(request, env) {
 
 async function handleToolUpdate(request, env, name) {
   try {
-    const body = await request.json();
-    await sb(env, `tools?name=eq.${name}`, { method: 'PATCH', body: JSON.stringify(body) });
+    await sb(env, `tools?name=eq.${name}`, { method: 'PATCH', body: JSON.stringify(await request.json()) });
+    return json({ ok: true });
+  } catch (e) {
+    return json({ error: e.message }, 500);
+  }
+}
+
+// ── /agents ───────────────────────────────────────
+async function handleAgentsList(request, env) {
+  try {
+    const res = await sb(env, 'agents?order=name.asc', { headers: { 'Prefer': 'return=representation' } });
+    if (!res.ok) return json({ agents: [] });
+    return json({ agents: await res.json() });
+  } catch (e) {
+    return json({ error: e.message }, 500);
+  }
+}
+
+async function handleAgentUpdate(request, env, name) {
+  try {
+    await sb(env, `agents?name=eq.${name}`, { method: 'PATCH', body: JSON.stringify(await request.json()) });
     return json({ ok: true });
   } catch (e) {
     return json({ error: e.message }, 500);
@@ -380,16 +444,18 @@ async function handleToolUpdate(request, env, name) {
 async function extractAndSaveFacts(env, userMessage, aiReply) {
   const res = await callGroq(env, [{
     role: 'user',
-    content: `Extract specific, durable facts about the user (Umar) from this exchange. Only include personal, long-lasting info (preferences, goals, constraints, decisions). Skip generic info.
+    content: `Extract specific, durable facts about the user (Umar) from this exchange. Only personal, long-lasting info: preferences, goals, constraints, key decisions.
 
 User: ${userMessage}
 AI: ${aiReply}
 
 JSON only: {"facts": [{"text": "...", "tag": "preference|goal|constraint|fact|decision"}]}
-If nothing worth saving: {"facts": []}`,
+Nothing to save? Return: {"facts": []}`,
   }]);
-  const parsed = JSON.parse(res.choices[0].message.content);
-  if (parsed.facts?.length) await saveFacts(env, parsed.facts);
+  try {
+    const parsed = JSON.parse(res.choices[0].message.content);
+    if (parsed.facts?.length) await saveFacts(env, parsed.facts);
+  } catch {}
 }
 
 // ── helper ────────────────────────────────────────

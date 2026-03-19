@@ -38,8 +38,11 @@ export default {
     if (m === 'GET'   && p === '/state')           return handleStateLoad(request, env);
     if (m === 'GET'   && p === '/tools')           return handleToolsList(request, env);
     if (m === 'PATCH' && p.startsWith('/tools/'))  return handleToolUpdate(request, env, p.split('/')[2]);
-    if (m === 'GET'   && p === '/agents')          return handleAgentsList(request, env);
-    if (m === 'PATCH' && p.startsWith('/agents/')) return handleAgentUpdate(request, env, p.split('/')[2]);
+    if (m === 'GET'   && p === '/agents')           return handleAgentsList(request, env);
+    if (m === 'PATCH' && p.startsWith('/agents/'))  return handleAgentUpdate(request, env, p.split('/')[2]);
+    if (m === 'GET'   && p === '/nudges')           return handleNudgesList(request, env);
+    if (m === 'POST'  && p === '/nudges/generate')  return handleNudgesGenerate(request, env);
+    if (m === 'PATCH' && p.startsWith('/nudges/'))  return handleNudgeDismiss(request, env, p.split('/')[2]);
 
     return new Response('Not found', { status: 404 });
   }
@@ -456,6 +459,79 @@ Nothing to save? Return: {"facts": []}`,
     const parsed = JSON.parse(res.choices[0].message.content);
     if (parsed.facts?.length) await saveFacts(env, parsed.facts);
   } catch {}
+}
+
+// ── /nudges ───────────────────────────────────────
+async function handleNudgesList(request, env) {
+  try {
+    const res = await sb(env, 'nudges?dismissed=eq.false&order=priority.desc', {
+      headers: { 'Prefer': 'return=representation' },
+    });
+    if (!res.ok) return json({ nudges: [] });
+    return json({ nudges: await res.json() });
+  } catch (e) {
+    return json({ error: e.message }, 500);
+  }
+}
+
+async function handleNudgesGenerate(_request, env) {
+  try {
+    // Load all context in parallel
+    const [stateRows, messages, facts] = await Promise.all([
+      sb(env, 'app_state?id=eq.1', { headers: { 'Prefer': 'return=representation' } })
+        .then(r => r.ok ? r.json() : []),
+      loadMessages(env, 30),
+      loadFacts(env),
+    ]);
+
+    const appData = stateRows[0]?.data || {};
+    const ventures  = appData.ventures  || [];
+    const tasks     = appData.tasks     || [];
+    const decisions = appData.decisions || [];
+    const now       = new Date();
+
+    const overdue = tasks.filter(t => !t.done && t.due && new Date(t.due) < now);
+    const pending = tasks.filter(t => !t.done);
+
+    const context = [
+      `Date: ${now.toLocaleDateString('en-IN', { weekday:'long', year:'numeric', month:'long', day:'numeric' })}`,
+      `\nVENTURES (${ventures.length}):\n${ventures.map(v => `- ${v.name}: ${v.status||'active'} | ${v.kpi||'-'}`).join('\n')}`,
+      `\nTASKS: ${pending.length} pending, ${overdue.length} overdue${overdue.length ? ' ('+overdue.map(t=>t.title).join(', ')+')' : ''}`,
+      `\nRECENT DECISIONS:\n${decisions.slice(0,3).map(d=>`- ${d.title}: ${d.outcome||'no outcome yet'}`).join('\n')}`,
+      `\nKNOWN FACTS:\n${facts.slice(0,15).map(f=>`- [${f.tag}] ${f.text}`).join('\n')}`,
+      `\nRECENT CHAT:\n${messages.slice(-8).map(m=>`${m.role}: ${m.content.slice(0,80)}`).join('\n')}`,
+    ].join('');
+
+    const res = await callGroq(env, [
+      { role: 'system', content: 'You are NEXUS, a proactive AI assistant for Umar. Generate 4-5 specific, actionable nudges based on his current situation. Be specific — use real venture/task names. Mix types: warnings for overdue items, actions for opportunities, info for patterns. Keep each nudge under 15 words. Return JSON only: {"nudges":[{"text":"...","type":"info|warning|action","priority":1-10}]}' },
+      { role: 'user', content: context },
+    ]);
+
+    const parsed = JSON.parse(res.choices[0].message.content);
+    const nudges = parsed.nudges || [];
+
+    // Replace undismissed nudges with fresh ones
+    await sb(env, 'nudges?dismissed=eq.false', { method: 'DELETE' });
+    if (nudges.length) {
+      await sb(env, 'nudges', { method: 'POST', body: JSON.stringify(nudges) });
+    }
+
+    const fresh = await sb(env, 'nudges?dismissed=eq.false&order=priority.desc', {
+      headers: { 'Prefer': 'return=representation' },
+    });
+    return json({ nudges: fresh.ok ? await fresh.json() : [] });
+  } catch (e) {
+    return json({ error: e.message }, 500);
+  }
+}
+
+async function handleNudgeDismiss(_request, env, id) {
+  try {
+    await sb(env, `nudges?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ dismissed: true }) });
+    return json({ ok: true });
+  } catch (e) {
+    return json({ error: e.message }, 500);
+  }
 }
 
 // ── helper ────────────────────────────────────────

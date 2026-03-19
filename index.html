@@ -1640,20 +1640,26 @@ async function renderIntegrations() {
   const list = document.getElementById('integrations-list');
   list.innerHTML = '<div class="empty-state">Loading...</div>';
 
-  const [ghRes, calRes] = await Promise.all([
+  const [ghRes, calRes, tgRes] = await Promise.all([
     fetch(`${NEXUS_WORKER_URL}/github`).then(r => r.json()).catch(() => null),
     fetch(`${NEXUS_WORKER_URL}/calendar`).then(r => r.json()).catch(() => null),
+    fetch(`${NEXUS_WORKER_URL}/telegram/status`).then(r => r.json()).catch(() => null),
   ]);
 
   list.innerHTML = '';
 
   // ── Telegram ──
+  const tgOk = tgRes?.connected;
   list.appendChild(buildIntCard({
     icon: '✈', color: '#38bdf8',
     name: 'Telegram Bot',
-    desc: 'Chat with NEXUS from anywhere via Telegram',
-    status: 'configure',
-    body: `
+    desc: tgOk ? `@${tgRes.bot.username} — ready` : 'Chat with NEXUS from anywhere via Telegram',
+    status: tgOk ? 'connected' : 'configure',
+    body: tgOk ? `
+      <div class="int-setup">
+        Bot <strong>@${tgRes.bot.username}</strong> is active. Message it on Telegram to chat with NEXUS from anywhere.<br>
+        Your user ID <code>803303810</code> is the only authorised user.
+      </div>` : `
       <div class="int-setup">
         <strong>Setup (one time):</strong><br>
         1. Message <code>@BotFather</code> on Telegram → <code>/newbot</code> → copy the token<br>
@@ -1665,6 +1671,7 @@ async function renderIntegrations() {
         <code>curl "https://api.telegram.org/botTOKEN/setWebhook?url=WORKER_URL/telegram"</code>
       </div>`
   }));
+
 
   // ── GitHub ──
   const ghOk = ghRes && !ghRes.error;

@@ -44,6 +44,7 @@ export default {
     if (m === 'POST'  && p === '/nudges/generate')  return handleNudgesGenerate(request, env);
     if (m === 'PATCH' && p.startsWith('/nudges/'))  return handleNudgeDismiss(request, env, p.split('/')[2]);
     if (m === 'POST'  && p === '/telegram')         return handleTelegram(request, env);
+    if (m === 'GET'   && p === '/telegram/status')  return handleTelegramStatus(request, env);
     if (m === 'GET'   && p === '/github')           return handleGitHub(request, env);
     if (m === 'GET'   && p === '/calendar')         return handleCalendar(request, env);
 
@@ -530,12 +531,25 @@ async function handleTelegram(request, env) {
   }
 }
 
+async function handleTelegramStatus(_request, env) {
+  try {
+    if (!env.TELEGRAM_BOT_TOKEN) return json({ connected: false, reason: 'Token not set' });
+    const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/getMe`);
+    const data = await res.json();
+    if (!data.ok) return json({ connected: false, reason: data.description });
+    return json({ connected: true, bot: data.result });
+  } catch (e) {
+    return json({ connected: false, reason: e.message });
+  }
+}
+
 async function tgSend(env, chatId, text) {
-  await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+  const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' }),
   });
+  if (!res.ok) throw new Error(`Telegram ${res.status}: ${await res.text()}`);
 }
 
 // ── /github ───────────────────────────────────────

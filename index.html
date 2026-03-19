@@ -496,6 +496,24 @@
   .nudge-dismiss { margin-left: auto; background: none; border: none; color: var(--text3); cursor: pointer; font-size: 16px; padding: 2px 6px; border-radius: 4px; flex-shrink: 0; }
   .nudge-dismiss:hover { color: var(--text1); background: var(--surface); }
 
+  /* ── INTEGRATIONS ── */
+  .int-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .int-header { display: flex; align-items: center; gap: 14px; padding: 18px 20px; }
+  .int-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+  .int-name { font-weight: 700; font-size: 14px; }
+  .int-desc { font-size: 12px; color: var(--text2); margin-top: 2px; }
+  .int-status { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 11px; font-family: var(--font-mono); }
+  .int-dot { width: 7px; height: 7px; border-radius: 50%; }
+  .int-dot.green { background: #34d399; box-shadow: 0 0 6px #34d399; }
+  .int-dot.red   { background: #f87171; }
+  .int-dot.grey  { background: var(--text3); }
+  .int-body { padding: 0 20px 18px; border-top: 1px solid var(--border); }
+  .int-setup { font-size: 12px; color: var(--text2); line-height: 1.7; margin-top: 14px; }
+  .int-setup code { background: var(--surface); padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--accent2); }
+  .int-data { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+  .int-row { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text2); padding: 6px 10px; background: var(--surface); border-radius: 6px; }
+  .int-row-label { font-family: var(--font-mono); font-size: 10px; color: var(--text3); min-width: 60px; }
+
   /* ── AGENTS PAGE ── */
   .agent-card {
     background: var(--bg2); border: 1px solid var(--border);
@@ -639,6 +657,9 @@
     </div>
     <div class="nav-item" onclick="navigate('agents')" data-page="agents" data-tip="Agents">
       <span>◈</span><span class="nav-label">Agents</span>
+    </div>
+    <div class="nav-item" onclick="navigate('integrations')" data-page="integrations" data-tip="Integrations">
+      <span>⇄</span><span class="nav-label">Integrations</span>
     </div>
     <div class="toggle-sidebar" onclick="toggleSidebar()" data-tip="Expand">
       <span id="toggle-icon">▶</span>
@@ -836,6 +857,16 @@
           Analysing your data...
         </div>
         <div id="insights-list"></div>
+      </div>
+
+      <!-- ══ INTEGRATIONS ══ -->
+      <div class="page" id="page-integrations">
+        <div class="section-header">
+          <div class="section-title">Integrations</div>
+          <button class="btn btn-primary btn-sm" onclick="renderIntegrations()">↻ Refresh</button>
+        </div>
+        <p style="font-size:13px;color:var(--text2);margin-bottom:24px;line-height:1.6">Connect external services — all credentials are stored as Worker secrets, never in the repo.</p>
+        <div id="integrations-list" style="display:flex;flex-direction:column;gap:16px"></div>
       </div>
 
       <!-- ══ AGENTS ══ -->
@@ -1037,7 +1068,7 @@ let state = load();
 // ═══════════════════════════════════════════════
 // NAVIGATION
 // ═══════════════════════════════════════════════
-const PAGE_TITLES = { dashboard:'Dashboard', chat:'AI Chat', ventures:'Ventures', tasks:'Tasks', decisions:'Decision Journal', memory:'Memory Bank', insights:'Insights', tools:'Tools & Skills', agents:'Agent Studio' };
+const PAGE_TITLES = { dashboard:'Dashboard', chat:'AI Chat', ventures:'Ventures', tasks:'Tasks', decisions:'Decision Journal', memory:'Memory Bank', insights:'Insights', tools:'Tools & Skills', agents:'Agent Studio', integrations:'Integrations' };
 
 function navigate(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -1055,6 +1086,7 @@ function navigate(page) {
   if (page === 'chat') renderSuggestions();
   if (page === 'tools') renderTools();
   if (page === 'agents') renderAgents();
+  if (page === 'integrations') renderIntegrations();
 }
 
 let sidebarExpanded = false;
@@ -1600,6 +1632,121 @@ function showSetup() { document.getElementById('setup-modal').style.display = 'f
 function hideSetup() { document.getElementById('setup-modal').style.display = 'none'; }
 
 function renderAll() { renderDashboard(); updateVentureDropdowns(); }
+
+// ═══════════════════════════════════════════════
+// INTEGRATIONS PAGE
+// ═══════════════════════════════════════════════
+async function renderIntegrations() {
+  const list = document.getElementById('integrations-list');
+  list.innerHTML = '<div class="empty-state">Loading...</div>';
+
+  const [ghRes, calRes] = await Promise.all([
+    fetch(`${NEXUS_WORKER_URL}/github`).then(r => r.json()).catch(() => null),
+    fetch(`${NEXUS_WORKER_URL}/calendar`).then(r => r.json()).catch(() => null),
+  ]);
+
+  list.innerHTML = '';
+
+  // ── Telegram ──
+  list.appendChild(buildIntCard({
+    icon: '✈', color: '#38bdf8',
+    name: 'Telegram Bot',
+    desc: 'Chat with NEXUS from anywhere via Telegram',
+    status: 'configure',
+    body: `
+      <div class="int-setup">
+        <strong>Setup (one time):</strong><br>
+        1. Message <code>@BotFather</code> on Telegram → <code>/newbot</code> → copy the token<br>
+        2. Get your Telegram user ID from <code>@userinfobot</code><br>
+        3. Run in terminal:<br>
+        <code>npx wrangler secret put TELEGRAM_BOT_TOKEN</code><br>
+        <code>npx wrangler secret put TELEGRAM_ALLOWED_ID</code><br>
+        4. Register the webhook (replace TOKEN and WORKER_URL):<br>
+        <code>curl "https://api.telegram.org/botTOKEN/setWebhook?url=WORKER_URL/telegram"</code>
+      </div>`
+  }));
+
+  // ── GitHub ──
+  const ghOk = ghRes && !ghRes.error;
+  const ghBody = ghOk ? `
+    <div class="int-data">
+      ${(ghRes.activity || []).map(e => `
+        <div class="int-row">
+          <span class="int-row-label">${e.type}</span>
+          <span>${e.repo}</span>
+          <span style="margin-left:auto;font-size:11px;color:var(--text3)">${timeAgo(e.time)}</span>
+        </div>`).join('')}
+    </div>` : `
+    <div class="int-setup">
+      Fetches public GitHub activity automatically.<br>
+      For private repos or higher rate limits:<br>
+      <code>npx wrangler secret put GITHUB_TOKEN</code>
+    </div>`;
+
+  list.appendChild(buildIntCard({
+    icon: '⑂', color: '#f0f6ff',
+    name: 'GitHub',
+    desc: `${ghOk ? (ghRes.user + ' — ' + ghRes.repos?.length + ' repos') : 'Track commits, repos and activity'}`,
+    status: ghOk ? 'connected' : 'disconnected',
+    body: ghBody,
+  }));
+
+  // ── Google Calendar ──
+  const calOk = calRes?.configured && !calRes.error;
+  const calBody = calOk ? `
+    <div class="int-data">
+      ${(calRes.events || []).map(e => `
+        <div class="int-row">
+          <span class="int-row-label">${formatCalDate(e.start)}</span>
+          <span>${e.title}</span>
+        </div>`).join('')}
+    </div>` : `
+    <div class="int-setup">
+      1. Open Google Calendar → Settings → your calendar → <em>Integrate calendar</em><br>
+      2. Copy the <strong>Secret address in iCal format</strong><br>
+      3. <code>npx wrangler secret put CALENDAR_ICS_URL</code>
+    </div>`;
+
+  list.appendChild(buildIntCard({
+    icon: '◫', color: '#34d399',
+    name: 'Google Calendar',
+    desc: calOk ? `${calRes.events?.length || 0} upcoming events` : 'See your schedule inside NEXUS',
+    status: calOk ? 'connected' : (calRes?.configured ? 'error' : 'not configured'),
+    body: calBody,
+  }));
+}
+
+function buildIntCard({ icon, color, name, desc, status, body }) {
+  const dotClass = status === 'connected' ? 'green' : status === 'configure' ? 'grey' : 'red';
+  const statusLabel = status === 'connected' ? 'CONNECTED' : status === 'configure' ? 'SETUP REQUIRED' : status === 'not configured' ? 'NOT CONFIGURED' : status.toUpperCase();
+  const div = document.createElement('div');
+  div.className = 'int-card';
+  div.innerHTML = `
+    <div class="int-header">
+      <div class="int-icon" style="background:${color}18;color:${color};border:1px solid ${color}30">${icon}</div>
+      <div><div class="int-name">${name}</div><div class="int-desc">${desc}</div></div>
+      <div class="int-status">
+        <div class="int-dot ${dotClass}"></div>
+        <span style="color:var(--text3)">${statusLabel}</span>
+      </div>
+    </div>
+    <div class="int-body">${body}</div>`;
+  return div;
+}
+
+function timeAgo(iso) {
+  const s = (Date.now() - new Date(iso)) / 1000;
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s/60) + 'm ago';
+  if (s < 86400) return Math.floor(s/3600) + 'h ago';
+  return Math.floor(s/86400) + 'd ago';
+}
+
+function formatCalDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-IN', { weekday:'short', day:'numeric', month:'short' });
+}
 
 // ═══════════════════════════════════════════════
 // AGENTS PAGE

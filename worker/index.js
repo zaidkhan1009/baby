@@ -43,6 +43,9 @@ export default {
     if (m === 'GET'   && p === '/nudges')           return handleNudgesList(request, env);
     if (m === 'POST'  && p === '/nudges/generate')  return handleNudgesGenerate(request, env);
     if (m === 'PATCH' && p.startsWith('/nudges/'))  return handleNudgeDismiss(request, env, p.split('/')[2]);
+    if (m === 'POST'  && p === '/telegram')         return handleTelegram(request, env);
+    if (m === 'GET'   && p === '/github')           return handleGitHub(request, env);
+    if (m === 'GET'   && p === '/calendar')         return handleCalendar(request, env);
 
     return new Response('Not found', { status: 404 });
   }
@@ -459,6 +462,147 @@ Nothing to save? Return: {"facts": []}`,
     const parsed = JSON.parse(res.choices[0].message.content);
     if (parsed.facts?.length) await saveFacts(env, parsed.facts);
   } catch {}
+}
+
+// ── /telegram ─────────────────────────────────────
+const DEFAULT_SYSTEM = "You are NEXUS, Umar's personal AI assistant. Be concise and direct. Use ₹ for Indian currency.";
+
+async function handleTelegram(request, env) {
+  try {
+    const body = await request.json();
+    const msg = body.message || body.edited_message;
+    if (!msg?.text) return json({ ok: true });
+
+    const chatId = msg.chat.id;
+    const userId = String(msg.from.id);
+
+    // Auth — only allow configured Telegram ID
+    if (env.TELEGRAM_ALLOWED_ID && userId !== String(env.TELEGRAM_ALLOWED_ID)) {
+      await tgSend(env, chatId, '⛔ Unauthorized.');
+      return json({ ok: true });
+    }
+
+    const text = msg.text;
+    const agentName = classifyIntent(text);
+    const [history, facts, agent, tools] = await Promise.all([
+      loadMessages(env, 20),
+      loadFacts(env),
+      loadAgent(env, agentName),
+      loadEnabledTools(env),
+    ]);
+
+    const factsBlock = facts.length
+      ? `\n\nKNOWN FACTS:\n${facts.map(f => `- [${f.tag}] ${f.text}`).join('\n')}` : '';
+    const prompt = (agent.system_prompt || DEFAULT_SYSTEM) + factsBlock;
+    const agentToolNames = agent.tools || [];
+    const toolDefs = tools
+      .filter(t => !agentToolNames.length || agentToolNames.includes(t.name))
+      .map(t => TOOL_DEFS[t.name]).filter(Boolean);
+
+    const messages = [
+      { role: 'system', content: prompt },
+      ...history.map(m => ({ role: m.role, content: m.content })),
+      { role: 'user', content: text },
+    ];
+
+    let reply = '';
+    for (let i = 0; i < 5; i++) {
+      const res = await callGroq(env, messages, toolDefs);
+      const choice = res.choices[0];
+      if (choice.finish_reason === 'tool_calls') {
+        messages.push(choice.message);
+        for (const tc of choice.message.tool_calls) {
+          const args = JSON.parse(tc.function.arguments || '{}');
+          const result = await executeTool(env, tc.function.name, args);
+          messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) });
+        }
+      } else { reply = choice.message.content; break; }
+    }
+
+    await saveMessage(env, 'user', `[TG] ${text}`);
+    await saveMessage(env, 'assistant', reply);
+    extractAndSaveFacts(env, text, reply).catch(() => {});
+
+    await tgSend(env, chatId, `${agent.icon} *${agent.name.toUpperCase()}*\n\n${reply}`);
+    return json({ ok: true });
+  } catch (e) {
+    return json({ error: e.message }, 500);
+  }
+}
+
+async function tgSend(env, chatId, text) {
+  await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' }),
+  });
+}
+
+// ── /github ───────────────────────────────────────
+async function handleGitHub(_request, env) {
+  try {
+    const user = env.GITHUB_USERNAME || 'zaidkhan1009';
+    const headers = { 'User-Agent': 'NEXUS/1.0', 'Accept': 'application/vnd.github.v3+json' };
+    if (env.GITHUB_TOKEN) headers['Authorization'] = `Bearer ${env.GITHUB_TOKEN}`;
+
+    const [evRes, repoRes] = await Promise.all([
+      fetch(`https://api.github.com/users/${user}/events/public?per_page=15`, { headers }),
+      fetch(`https://api.github.com/users/${user}/repos?sort=updated&per_page=6`, { headers }),
+    ]);
+
+    const events = evRes.ok ? await evRes.json() : [];
+    const repos  = repoRes.ok ? await repoRes.json() : [];
+
+    const EVENT_LABELS = {
+      PushEvent: '⬆ Push', CreateEvent: '✦ Create', PullRequestEvent: '⇄ PR',
+      IssuesEvent: '◉ Issue', WatchEvent: '★ Star', ForkEvent: '⑂ Fork',
+    };
+
+    const activity = events.slice(0, 8).map(e => ({
+      type: EVENT_LABELS[e.type] || e.type.replace('Event', ''),
+      repo: e.repo.name.split('/')[1],
+      time: e.created_at,
+    }));
+
+    const repoList = repos.map(r => ({
+      name: r.name, description: r.description,
+      stars: r.stargazers_count, updated: r.updated_at,
+    }));
+
+    return json({ activity, repos: repoList, user });
+  } catch (e) {
+    return json({ error: e.message }, 500);
+  }
+}
+
+// ── /calendar ─────────────────────────────────────
+async function handleCalendar(_request, env) {
+  try {
+    if (!env.CALENDAR_ICS_URL) return json({ events: [], configured: false });
+    const res = await fetch(env.CALENDAR_ICS_URL);
+    if (!res.ok) return json({ events: [], configured: true, error: 'Fetch failed' });
+    const events = parseICS(await res.text());
+    return json({ events: events.slice(0, 10), configured: true });
+  } catch (e) {
+    return json({ error: e.message }, 500);
+  }
+}
+
+function parseICS(ics) {
+  const events = [];
+  const blocks = ics.split('BEGIN:VEVENT');
+  for (let i = 1; i < blocks.length; i++) {
+    const get = key => { const m = blocks[i].match(new RegExp(key + '[^:]*:(.+)')); return m ? m[1].trim() : ''; };
+    const title = get('SUMMARY');
+    const start = get('DTSTART');
+    if (!title || !start) continue;
+    const d = start.replace(/[TZ]/g, ' ').trim();
+    const iso = new Date(`${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}T${d.slice(9,11)||'00'}:${d.slice(11,13)||'00'}:00`).toISOString();
+    events.push({ title, start: iso });
+  }
+  return events
+    .filter(e => new Date(e.start) >= new Date(Date.now() - 3_600_000))
+    .sort((a, b) => new Date(a.start) - new Date(b.start));
 }
 
 // ── /nudges ───────────────────────────────────────

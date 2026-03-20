@@ -4,6 +4,9 @@ compatibility_date = "2025-01-01"
 account_id = "0f5d849a31acd27b71eb73fda2f20e4c"
 workers_dev = true
 
+[ai]
+binding = "AI"
+
 [observability]
 enabled = false
 head_sampling_rate = 1

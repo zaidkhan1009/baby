@@ -82,9 +82,40 @@ async function loadFacts(env) {
   return res.json();
 }
 
+async function generateEmbedding(env, text) {
+  try {
+    const result = await env.AI.run('@cf/baai/bge-base-en-v1.5', { text: [text] });
+    return result.data[0]; // 768-dim float array
+  } catch {
+    return null;
+  }
+}
+
+async function searchFacts(env, queryText) {
+  try {
+    const embedding = await generateEmbedding(env, queryText);
+    if (!embedding) return loadFacts(env);
+    const res = await sb(env, 'rpc/match_facts', {
+      method: 'POST',
+      headers: { 'Prefer': 'return=representation' },
+      body: JSON.stringify({ query_embedding: embedding, match_count: 10 }),
+    });
+    if (!res.ok) return loadFacts(env);
+    return res.json();
+  } catch {
+    return loadFacts(env);
+  }
+}
+
 async function saveFacts(env, facts) {
   if (!facts?.length) return;
-  await sb(env, 'facts', { method: 'POST', body: JSON.stringify(facts) });
+  const withEmbeddings = await Promise.all(
+    facts.map(async f => {
+      const embedding = await generateEmbedding(env, f.text);
+      return embedding ? { ...f, embedding: JSON.stringify(embedding) } : f;
+    })
+  );
+  await sb(env, 'facts', { method: 'POST', body: JSON.stringify(withEmbeddings) });
 }
 
 async function loadEnabledTools(env) {
@@ -291,7 +322,7 @@ async function handleChat(request, env) {
     const agentName = classifyIntent(message);
     const [history, facts, agent, enabledTools] = await Promise.all([
       loadMessages(env, 30),
-      loadFacts(env),
+      searchFacts(env, message),
       loadAgent(env, agentName),
       loadEnabledTools(env),
     ]);
@@ -466,7 +497,7 @@ Nothing to save? Return: {"facts": []}`,
 }
 
 // ── /telegram ─────────────────────────────────────
-const DEFAULT_SYSTEM = "You are NEXUS, Umar's personal AI assistant. Be concise and direct. Use ₹ for Indian currency.";
+const DEFAULT_SYSTEM = "You are NEXUS, Umar's personal AI assistant. Be concise and direct. Use ₹ for Indian currency. Only use tools when genuinely needed — do NOT call save_note or get_notes for simple conversational messages.";
 
 async function handleTelegram(request, env) {
   try {
@@ -487,7 +518,7 @@ async function handleTelegram(request, env) {
     const agentName = classifyIntent(text);
     const [history, facts, agent, tools] = await Promise.all([
       loadMessages(env, 20),
-      loadFacts(env),
+      searchFacts(env, text),
       loadAgent(env, agentName),
       loadEnabledTools(env),
     ]);
@@ -519,6 +550,11 @@ async function handleTelegram(request, env) {
         }
       } else { reply = choice.message.content; break; }
     }
+
+    // Strip leaked function-call syntax the model occasionally emits as plain text
+    reply = reply.replace(/<function[^>]*>[\s\S]*?<\/function>/g, '').trim();
+    reply = reply.replace(/\{?\s*"function"\s*:[\s\S]*?\}/g, '').trim();
+    if (!reply) reply = "I'm here — what would you like to know?";
 
     await saveMessage(env, 'user', `[TG] ${text}`);
     await saveMessage(env, 'assistant', reply);

@@ -47,9 +47,14 @@ export default {
     if (m === 'GET'   && p === '/telegram/status')  return handleTelegramStatus(request, env);
     if (m === 'GET'   && p === '/github')           return handleGitHub(request, env);
     if (m === 'GET'   && p === '/calendar')         return handleCalendar(request, env);
+    if (m === 'POST'  && p === '/brief')            return handleMorningBrief(env).then(() => json({ ok: true }));
 
     return new Response('Not found', { status: 404 });
-  }
+  },
+
+  async scheduled(_event, env) {
+    await handleMorningBrief(env);
+  },
 };
 
 // ── Supabase helpers ──────────────────────────────
@@ -560,7 +565,19 @@ async function handleTelegram(request, env) {
     await saveMessage(env, 'assistant', reply);
     extractAndSaveFacts(env, text, reply).catch(() => {});
 
-    await tgSend(env, chatId, `${agent.icon} *${agent.name.toUpperCase()}*\n\n${reply}`);
+    // Strip markdown for TTS, truncate at 1500 chars
+    const plainReply = reply.replace(/[*_`]/g, '').trim();
+    const voiceText  = plainReply.length > 1500 ? plainReply.slice(0, 1500) + '...' : plainReply;
+    const audio = await textToSpeech(env, voiceText).catch(() => null);
+    if (audio) {
+      await tgSendVoice(env, chatId, audio);
+      // If reply was long, also send full text so nothing is lost
+      if (plainReply.length > 1500) {
+        await tgSend(env, chatId, `${agent.icon} *${agent.name.toUpperCase()}*\n\n${reply}`);
+      }
+    } else {
+      await tgSend(env, chatId, `${agent.icon} *${agent.name.toUpperCase()}*\n\n${reply}`);
+    }
     return json({ ok: true });
   } catch (e) {
     return json({ error: e.message }, 500);
@@ -586,6 +603,36 @@ async function tgSend(env, chatId, text) {
     body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' }),
   });
   if (!res.ok) throw new Error(`Telegram ${res.status}: ${await res.text()}`);
+}
+
+async function textToSpeech(env, text) {
+  if (!env.VOICERSS_API_KEY) return null;
+  const params = new URLSearchParams({
+    key: env.VOICERSS_API_KEY,
+    hl:  'en-us',
+    src: text,
+    c:   'MP3',
+    f:   '44khz_16bit_stereo',
+  });
+  const res = await fetch(`https://api.voicerss.org/?${params}`);
+  if (!res.ok) return null;
+  // VoiceRSS returns error as plain text starting with "ERROR:"
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('text')) return null;
+  return res.arrayBuffer();
+}
+
+async function tgSendVoice(env, chatId, audioBuffer) {
+  const form = new FormData();
+  form.append('chat_id', String(chatId));
+  form.append('audio', new Blob([audioBuffer], { type: 'audio/mpeg' }), 'nexus.mp3');
+  form.append('title', 'NEXUS');
+  form.append('performer', 'NEXUS AI');
+  const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendAudio`, {
+    method: 'POST',
+    body: form,
+  });
+  if (!res.ok) throw new Error(`Telegram sendAudio ${res.status}: ${await res.text()}`);
 }
 
 // ── /github ───────────────────────────────────────
@@ -725,6 +772,67 @@ async function handleNudgeDismiss(_request, env, id) {
     return json({ ok: true });
   } catch (e) {
     return json({ error: e.message }, 500);
+  }
+}
+
+// ── Cron: morning brief ───────────────────────────
+async function handleMorningBrief(env) {
+  try {
+    const chatId = env.TELEGRAM_ALLOWED_ID;
+    if (!chatId || !env.TELEGRAM_BOT_TOKEN) return;
+
+    const now = new Date();
+    const [stateRows, facts, nudgesRes] = await Promise.all([
+      sb(env, 'app_state?id=eq.1', { headers: { 'Prefer': 'return=representation' } }).then(r => r.ok ? r.json() : []),
+      loadFacts(env),
+      sb(env, 'nudges?dismissed=eq.false&order=priority.desc&limit=5', { headers: { 'Prefer': 'return=representation' } }).then(r => r.ok ? r.json() : []),
+    ]);
+
+    const appData = stateRows[0]?.data || {};
+    const ventures  = appData.ventures  || [];
+    const tasks     = appData.tasks     || [];
+    const overdue   = tasks.filter(t => !t.done && t.due && new Date(t.due) < now);
+    const dueToday  = tasks.filter(t => !t.done && t.due && new Date(t.due).toDateString() === now.toDateString());
+
+    const context = [
+      `Date: ${now.toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}`,
+      ventures.length  ? `Ventures: ${ventures.map(v => `${v.name} (${v.status || 'active'})`).join(', ')}` : '',
+      overdue.length   ? `OVERDUE (${overdue.length}): ${overdue.map(t => t.title).join(', ')}` : '',
+      dueToday.length  ? `Due today: ${dueToday.map(t => t.title).join(', ')}` : '',
+      nudgesRes.length ? `Nudges: ${nudgesRes.map(n => n.text).join(' | ')}` : '',
+      facts.length     ? `Key facts: ${facts.slice(0, 10).map(f => f.text).join('. ')}` : '',
+    ].filter(Boolean).join('\n');
+
+    const res = await callGroq(env, [
+      { role: 'system', content: `You are NEXUS. Generate a morning briefing for Umar using Telegram Markdown formatting (single asterisks for *bold*, underscores for _italic_). Structure it EXACTLY like this template — only include sections that have data:
+
+🌅 *NEXUS MORNING BRIEF*
+_Friday, 20 March 2026_
+━━━━━━━━━━━━━━━━━━━━
+
+🏢 *VENTURES*
+• Venture Name — status
+
+⚠️ *OVERDUE* _(urgent)_
+• Task name
+
+📌 *TODAY*
+• Task name
+
+💡 *NUDGES*
+• Nudge text
+
+🧠 *INSIGHT*
+One sharp, personalised observation about Umar's situation.
+
+━━━━━━━━━━━━━━━━━━━━
+Use ₹ for currency. Be specific, not generic. Max 250 words. Output only the message — no extra commentary.` },
+      { role: 'user', content: context },
+    ]);
+
+    await tgSend(env, chatId, res.choices[0].message.content);
+  } catch (_e) {
+    // silent — cron failures must not crash the worker
   }
 }
 

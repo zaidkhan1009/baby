@@ -48,6 +48,7 @@ export default {
     if (m === 'GET'   && p === '/github')           return handleGitHub(request, env);
     if (m === 'GET'   && p === '/calendar')         return handleCalendar(request, env);
     if (m === 'POST'  && p === '/brief')            return handleMorningBrief(env).then(() => json({ ok: true }));
+    if (m === 'POST'  && p === '/patterns/run')     return handleWeeklyPatterns(env, true);
     if (m === 'GET'   && p === '/state/debug')      return sb(env, 'app_state?id=eq.1', { headers: { 'Prefer': 'return=representation' } }).then(r => r.json()).then(d => json(d));
 
     return new Response('Not found', { status: 404 });
@@ -56,6 +57,7 @@ export default {
   async scheduled(event, env) {
     if (event.cron === '0 3 * * *') {
       await handleMorningBrief(env);
+      if (new Date().getDay() === 0) await handleWeeklyPatterns(env); // Sunday
     } else {
       await handleReminderCheck(env);
     }
@@ -1067,6 +1069,57 @@ async function handleReminderCheck(env) {
       }
     }
   } catch (_e) {}
+}
+
+// ── Cron: weekly pattern learning ─────────────────
+async function handleWeeklyPatterns(env, debug = false) {
+  try {
+    const chatId = env.TELEGRAM_ALLOWED_ID;
+    if (!chatId || !env.TELEGRAM_BOT_TOKEN) return debug ? json({ error: 'missing token or chatId' }) : null;
+
+    // Load last 7 days of messages
+    const res = await sb(env, 'messages?order=created_at.desc&limit=200', {
+      headers: { 'Prefer': 'return=representation' },
+    });
+    const messages = res.ok ? await res.json() : [];
+    if (messages.length < 5) return debug ? json({ error: 'not enough messages', count: messages.length }) : null;
+
+    const transcript = messages
+      .reverse()
+      .map(m => `${m.role === 'user' ? 'Umar' : 'NEXUS'}: ${m.content.slice(0, 120)}`)
+      .join('\n');
+
+    // Delete stale pattern facts before inserting fresh ones
+    await sb(env, "facts?tag=eq.pattern", { method: 'DELETE' });
+
+    const analysis = await callGroq(env, [{
+      role: 'system',
+      content: `You are a behavioral analyst. Analyze this week's conversation history between Umar and his AI assistant NEXUS. Extract 5-8 specific, durable behavioral patterns — things Umar repeatedly does, asks about, avoids, or prioritizes. Focus on habits, blind spots, recurring concerns, and neglected areas.
+
+Return JSON only:
+{"patterns": [{"text": "...", "tag": "pattern"}]}
+
+Be specific and honest. Bad example: "Umar talks about business". Good example: "Umar checks Cloud Kitchen daily but hasn't mentioned Poultry Farm in over a week".`,
+    }, {
+      role: 'user',
+      content: `Week's transcript:\n${transcript}`,
+    }]);
+
+    const raw = analysis.choices[0].message.content.replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(raw);
+    const patterns = parsed.patterns || [];
+
+    if (patterns.length) {
+      await saveFacts(env, patterns);
+    }
+
+    // Notify Umar on Telegram
+    const summary = patterns.map((p, i) => `${i + 1}. ${p.text}`).join('\n');
+    await tgSend(env, chatId, `🔍 *WEEKLY PATTERN REPORT*\n━━━━━━━━━━━━━━━━━━━━\n\nHere's what NEXUS noticed this week:\n\n${summary}\n\n_These patterns are now part of your memory and will influence future responses._`);
+    return debug ? json({ ok: true, patterns }) : null;
+  } catch (e) {
+    return debug ? json({ error: e.message }) : null;
+  }
 }
 
 // ── Cron: morning brief ───────────────────────────

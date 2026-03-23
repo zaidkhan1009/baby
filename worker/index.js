@@ -47,9 +47,21 @@ export default {
     if (m === 'GET'   && p === '/telegram/status')  return handleTelegramStatus(request, env);
     if (m === 'GET'   && p === '/github')           return handleGitHub(request, env);
     if (m === 'GET'   && p === '/calendar')         return handleCalendar(request, env);
+    if (m === 'POST'  && p === '/brief')            return handleMorningBrief(env).then(() => json({ ok: true }));
+    if (m === 'POST'  && p === '/patterns/run')     return handleWeeklyPatterns(env, true);
+    if (m === 'GET'   && p === '/state/debug')      return sb(env, 'app_state?id=eq.1', { headers: { 'Prefer': 'return=representation' } }).then(r => r.json()).then(d => json(d));
 
     return new Response('Not found', { status: 404 });
-  }
+  },
+
+  async scheduled(event, env) {
+    if (event.cron === '0 3 * * *') {
+      await handleMorningBrief(env);
+      if (new Date().getDay() === 0) await handleWeeklyPatterns(env); // Sunday
+    } else {
+      await handleReminderCheck(env);
+    }
+  },
 };
 
 // ── Supabase helpers ──────────────────────────────
@@ -515,6 +527,11 @@ async function handleTelegram(request, env) {
     }
 
     const text = msg.text;
+
+    // ── Command interception (before AI pipeline) ──
+    const handled = await handleTelegramCommand(env, chatId, text);
+    if (handled) return json({ ok: true });
+
     const agentName = classifyIntent(text);
     const [history, facts, agent, tools] = await Promise.all([
       loadMessages(env, 20),
@@ -560,7 +577,22 @@ async function handleTelegram(request, env) {
     await saveMessage(env, 'assistant', reply);
     extractAndSaveFacts(env, text, reply).catch(() => {});
 
-    await tgSend(env, chatId, `${agent.icon} *${agent.name.toUpperCase()}*\n\n${reply}`);
+    const wantsVoice = /\bvoice\b|\bspeak\b|\baudio\b|\bread (it |this |out|aloud)/i.test(text);
+    if (wantsVoice) {
+      const plainReply = reply.replace(/[*_`]/g, '').trim();
+      const voiceText  = plainReply.length > 1500 ? plainReply.slice(0, 1500) + '...' : plainReply;
+      const audio = await textToSpeech(env, voiceText).catch(() => null);
+      if (audio) {
+        await tgSendVoice(env, chatId, audio);
+        if (plainReply.length > 1500) {
+          await tgSend(env, chatId, `${agent.icon} *${agent.name.toUpperCase()}*\n\n${reply}`);
+        }
+      } else {
+        await tgSend(env, chatId, `${agent.icon} *${agent.name.toUpperCase()}*\n\n${reply}`);
+      }
+    } else {
+      await tgSend(env, chatId, `${agent.icon} *${agent.name.toUpperCase()}*\n\n${reply}`);
+    }
     return json({ ok: true });
   } catch (e) {
     return json({ error: e.message }, 500);
@@ -586,6 +618,36 @@ async function tgSend(env, chatId, text) {
     body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' }),
   });
   if (!res.ok) throw new Error(`Telegram ${res.status}: ${await res.text()}`);
+}
+
+async function textToSpeech(env, text) {
+  if (!env.VOICERSS_API_KEY) return null;
+  const params = new URLSearchParams({
+    key: env.VOICERSS_API_KEY,
+    hl:  'en-us',
+    src: text,
+    c:   'MP3',
+    f:   '44khz_16bit_stereo',
+  });
+  const res = await fetch(`https://api.voicerss.org/?${params}`);
+  if (!res.ok) return null;
+  // VoiceRSS returns error as plain text starting with "ERROR:"
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('text')) return null;
+  return res.arrayBuffer();
+}
+
+async function tgSendVoice(env, chatId, audioBuffer) {
+  const form = new FormData();
+  form.append('chat_id', String(chatId));
+  form.append('audio', new Blob([audioBuffer], { type: 'audio/mpeg' }), 'nexus.mp3');
+  form.append('title', 'NEXUS');
+  form.append('performer', 'NEXUS AI');
+  const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendAudio`, {
+    method: 'POST',
+    body: form,
+  });
+  if (!res.ok) throw new Error(`Telegram sendAudio ${res.status}: ${await res.text()}`);
 }
 
 // ── /github ───────────────────────────────────────
@@ -725,6 +787,399 @@ async function handleNudgeDismiss(_request, env, id) {
     return json({ ok: true });
   } catch (e) {
     return json({ error: e.message }, 500);
+  }
+}
+
+// ── Telegram command handler ──────────────────────
+async function loadAppState(env) {
+  const res = await sb(env, 'app_state?id=eq.1', { headers: { 'Prefer': 'return=representation' } });
+  if (!res.ok) return {};
+  const rows = await res.json();
+  return rows[0]?.data || {};
+}
+
+async function saveAppState(env, data) {
+  await sb(env, 'app_state', {
+    method: 'POST',
+    headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify({ id: 1, data, updated_at: new Date().toISOString() }),
+  });
+}
+
+async function handleTelegramCommand(env, chatId, text) {
+  const t = text.trim();
+  const lower = t.toLowerCase();
+
+  // ── SHOW DASHBOARD ──
+  if (/\bdashboard\b/i.test(t)) {
+    const state = await loadAppState(env);
+    const ventures = state.ventures || [];
+    const tasks    = state.tasks    || [];
+    const now      = new Date();
+    const overdue  = tasks.filter(t => !t.done && t.due && new Date(t.due) < now);
+    const pending  = tasks.filter(t => !t.done);
+    let msg = '🖥 *NEXUS DASHBOARD*\n━━━━━━━━━━━━━━━━━━━━\n';
+    msg += ventures.length
+      ? '\n🏢 *VENTURES*\n' + ventures.map(v => `• *${v.name}* — ${v.status || 'active'}${v.kpi ? ` | ${v.kpi}` : ''}`).join('\n')
+      : '\n🏢 *VENTURES*\n_None added yet_';
+    msg += pending.length
+      ? '\n\n📋 *TASKS*\n' + pending.map((t, i) => `${i + 1}. ${t.title}${t.due ? ` _(${t.due})_` : ''}${overdue.includes(t) ? ' ⚠️' : ''}`).join('\n')
+      : '\n\n📋 *TASKS*\n_None added yet_';
+    await tgSend(env, chatId, msg);
+    return true;
+  }
+
+  // ── SHOW TASKS ──
+  if (/\b(show|list|my|see|what('s| is| are)?( (my|the))?)?\s*tasks?\b/i.test(t) && !/add|create|new|set/i.test(t)) {
+    const state = await loadAppState(env);
+    const tasks = state.tasks || [];
+    if (!tasks.length) { await tgSend(env, chatId, '📋 *Tasks*\n\nNo tasks yet.'); return true; }
+    const pending = tasks.filter(t => !t.done);
+    const done    = tasks.filter(t => t.done);
+    let msg = '📋 *TASKS*\n━━━━━━━━━━━━━━━━━━━━\n';
+    if (pending.length) {
+      msg += '\n*Pending*\n' + pending.map((t, i) => `${i + 1}. ${t.title}${t.due ? ` _(due ${t.due})_` : ''}`).join('\n');
+    }
+    if (done.length) {
+      msg += '\n\n*Done*\n' + done.map(t => `✓ ${t.title}`).join('\n');
+    }
+    await tgSend(env, chatId, msg);
+    return true;
+  }
+
+  // ── ADD TASK ──
+  if (/\b(add|create|new)\b.*\btask\b/i.test(t)) {
+    const extracted = await extractTaskOrVenture(env, t, 'task');
+    if (!extracted.title) { await tgSend(env, chatId, '❌ Could not extract task. Try: "add task: Call supplier by Friday"'); return true; }
+    const state = await loadAppState(env);
+    const tasks = state.tasks || [];
+    tasks.push({ id: Date.now(), title: extracted.title, due: extracted.due || null, done: false });
+    await saveAppState(env, { ...state, tasks });
+    await tgSend(env, chatId, `✅ *Task added*\n\n${extracted.title}${extracted.due ? `\n_Due: ${extracted.due}_` : ''}`);
+    return true;
+  }
+
+  // ── DONE TASK ──
+  if (/\b(done|complete|finished|mark)\b/i.test(t) && /\btask\b/i.test(t)) {
+    const extracted = await extractTaskOrVenture(env, t, 'task');
+    const state = await loadAppState(env);
+    const tasks = state.tasks || [];
+    const idx = tasks.findIndex(tk => tk.title.toLowerCase().includes((extracted.title || '').toLowerCase()));
+    if (idx === -1) { await tgSend(env, chatId, '❌ Task not found. Use "show tasks" to see your list.'); return true; }
+    tasks[idx].done = true;
+    await saveAppState(env, { ...state, tasks });
+    await tgSend(env, chatId, `✅ *Marked done*\n\n${tasks[idx].title}`);
+    return true;
+  }
+
+  // ── SHOW VENTURES ──
+  if (/\b(show|list|my)?\s*ventures?\b/i.test(t) && !/add|create|new/i.test(t)) {
+    const state = await loadAppState(env);
+    const ventures = state.ventures || [];
+    if (!ventures.length) { await tgSend(env, chatId, '🏢 *Ventures*\n\nNo ventures yet.'); return true; }
+    const msg = '🏢 *VENTURES*\n━━━━━━━━━━━━━━━━━━━━\n\n' +
+      ventures.map(v => `*${v.name}*\nStatus: ${v.status || 'active'}${v.kpi ? `\nKPI: ${v.kpi}` : ''}`).join('\n\n');
+    await tgSend(env, chatId, msg);
+    return true;
+  }
+
+  // ── ADD VENTURE ──
+  if (/\b(add|create|new)\b.*\bventure\b/i.test(t)) {
+    const extracted = await extractTaskOrVenture(env, t, 'venture');
+    if (!extracted.title) { await tgSend(env, chatId, '❌ Could not extract venture. Try: "add venture: Bakery"'); return true; }
+    const state = await loadAppState(env);
+    const ventures = state.ventures || [];
+    ventures.push({ id: Date.now(), name: extracted.title, status: extracted.status || 'planning', kpi: extracted.kpi || null });
+    await saveAppState(env, { ...state, ventures });
+    await tgSend(env, chatId, `✅ *Venture added*\n\n${extracted.title}`);
+    return true;
+  }
+
+  // ── SHOW NOTES ──
+  if (/\bshow\s+notes?\b/i.test(t)) {
+    const res = await sb(env, 'notes?order=created_at.desc&limit=20', { headers: { 'Prefer': 'return=representation' } });
+    const notes = res.ok ? await res.json() : [];
+    if (!notes.length) { await tgSend(env, chatId, '📝 *Notes*\n\nNo notes saved.'); return true; }
+    const msg = '📝 *NOTES*\n━━━━━━━━━━━━━━━━━━━━\n\n' +
+      notes.map((n, i) => `*${i + 1}.* [ID:${n.id}] ${n.content}`).join('\n\n');
+    await tgSend(env, chatId, msg);
+    return true;
+  }
+
+  // ── DELETE NOTE (confirm) ──
+  if (/^confirm\s+delete\s+note\s+\d+/i.test(t)) {
+    const id = t.match(/\d+/)[0];
+    const res = await sb(env, `notes?id=eq.${id}`, { headers: { 'Prefer': 'return=representation' } });
+    const rows = res.ok ? await res.json() : [];
+    if (!rows.length) { await tgSend(env, chatId, '❌ Note not found.'); return true; }
+    await sb(env, 'deleted_notes', { method: 'POST', body: JSON.stringify({ original_id: rows[0].id, content: rows[0].content }) });
+    await sb(env, `notes?id=eq.${id}`, { method: 'DELETE' });
+    await tgSend(env, chatId, `🗑 *Note deleted & backed up*\n\n_${rows[0].content}_`);
+    return true;
+  }
+  if (/\bdelete\s+note\b/i.test(t)) {
+    const idMatch = t.match(/\d+/);
+    if (!idMatch) { await tgSend(env, chatId, '❌ Specify note ID. Use "show notes" to see IDs.'); return true; }
+    const res = await sb(env, `notes?id=eq.${idMatch[0]}`, { headers: { 'Prefer': 'return=representation' } });
+    const rows = res.ok ? await res.json() : [];
+    if (!rows.length) { await tgSend(env, chatId, '❌ Note not found.'); return true; }
+    await tgSend(env, chatId, `⚠️ *Delete this note?*\n\n_${rows[0].content}_\n\nReply: \`confirm delete note ${idMatch[0]}\``);
+    return true;
+  }
+
+  // ── CLEAR NOTES (confirm) ──
+  if (/^confirm\s+clear\s+all?\s+notes?/i.test(t)) {
+    const res = await sb(env, 'notes?id=gt.0', { headers: { 'Prefer': 'return=representation' } });
+    const notes = res.ok ? await res.json() : [];
+    if (notes.length) {
+      await sb(env, 'deleted_notes', { method: 'POST', body: JSON.stringify(notes.map(n => ({ original_id: n.id, content: n.content }))) });
+    }
+    await sb(env, 'notes?id=gt.0', { method: 'DELETE' });
+    await tgSend(env, chatId, `🗑 *${notes.length} notes deleted & backed up.*`);
+    return true;
+  }
+  if (/\bclear\s+all?\s+notes?\b/i.test(t)) {
+    const res = await sb(env, 'notes?id=gt.0', { headers: { 'Prefer': 'return=representation' } });
+    const notes = res.ok ? await res.json() : [];
+    await tgSend(env, chatId, `⚠️ *Delete all ${notes.length} notes?*\n\nReply: \`confirm clear all notes\``);
+    return true;
+  }
+
+  // ── SHOW FACTS ──
+  if (/\bshow\s+facts?\b/i.test(t)) {
+    const res = await sb(env, 'facts?order=created_at.desc&limit=30', { headers: { 'Prefer': 'return=representation' } });
+    const facts = res.ok ? await res.json() : [];
+    if (!facts.length) { await tgSend(env, chatId, '🧠 *Facts*\n\nNo facts stored yet.'); return true; }
+    const msg = '🧠 *STORED FACTS*\n━━━━━━━━━━━━━━━━━━━━\n\n' +
+      facts.map((f, i) => `*${i + 1}.* [ID:${f.id}] [${f.tag}] ${f.text}`).join('\n\n');
+    await tgSend(env, chatId, msg);
+    return true;
+  }
+
+  // ── DELETE FACT (confirm) ──
+  if (/^confirm\s+delete\s+fact\s+\d+/i.test(t)) {
+    const id = t.match(/\d+/)[0];
+    const res = await sb(env, `facts?id=eq.${id}`, { headers: { 'Prefer': 'return=representation' } });
+    const rows = res.ok ? await res.json() : [];
+    if (!rows.length) { await tgSend(env, chatId, '❌ Fact not found.'); return true; }
+    await sb(env, 'deleted_facts', { method: 'POST', body: JSON.stringify({ original_id: rows[0].id, text: rows[0].text, tag: rows[0].tag }) });
+    await sb(env, `facts?id=eq.${id}`, { method: 'DELETE' });
+    await tgSend(env, chatId, `🗑 *Fact deleted & backed up*\n\n_[${rows[0].tag}] ${rows[0].text}_`);
+    return true;
+  }
+  if (/\bdelete\s+fact\b/i.test(t)) {
+    const idMatch = t.match(/\d+/);
+    if (!idMatch) { await tgSend(env, chatId, '❌ Specify fact ID. Use "show facts" to see IDs.'); return true; }
+    const res = await sb(env, `facts?id=eq.${idMatch[0]}`, { headers: { 'Prefer': 'return=representation' } });
+    const rows = res.ok ? await res.json() : [];
+    if (!rows.length) { await tgSend(env, chatId, '❌ Fact not found.'); return true; }
+    await tgSend(env, chatId, `⚠️ *Delete this fact?*\n\n_[${rows[0].tag}] ${rows[0].text}_\n\nReply: \`confirm delete fact ${idMatch[0]}\``);
+    return true;
+  }
+
+  // ── CLEAR FACTS (confirm) ──
+  if (/^confirm\s+clear\s+all?\s+facts?/i.test(t)) {
+    const res = await sb(env, 'facts?id=gt.0', { headers: { 'Prefer': 'return=representation' } });
+    const facts = res.ok ? await res.json() : [];
+    if (facts.length) {
+      await sb(env, 'deleted_facts', { method: 'POST', body: JSON.stringify(facts.map(f => ({ original_id: f.id, text: f.text, tag: f.tag }))) });
+    }
+    await sb(env, 'facts?id=gt.0', { method: 'DELETE' });
+    await tgSend(env, chatId, `🗑 *${facts.length} facts deleted & backed up.*`);
+    return true;
+  }
+  if (/\bclear\s+all?\s+facts?\b/i.test(t)) {
+    const res = await sb(env, 'facts?id=gt.0', { headers: { 'Prefer': 'return=representation' } });
+    const facts = res.ok ? await res.json() : [];
+    await tgSend(env, chatId, `⚠️ *Delete all ${facts.length} facts?*\n\nReply: \`confirm clear all facts\``);
+    return true;
+  }
+
+  // ── REMINDER ──
+  if (/\bremind\b/i.test(t)) {
+    const reminder = await extractReminder(env, t);
+    if (reminder.text && reminder.remind_at) {
+      const recurring = /\bdaily\b|\bevery day\b/i.test(t);
+      await sb(env, 'reminders', { method: 'POST', body: JSON.stringify({ text: reminder.text, remind_at: reminder.remind_at, recurring }) });
+      const when = new Date(reminder.remind_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
+      await tgSend(env, chatId, `⏰ *Reminder set*\n\n${reminder.text}\n_${when} IST${recurring ? ' · daily' : ''}_`);
+      return true;
+    }
+  }
+
+  return false; // not a command — fall through to AI
+}
+
+async function extractTaskOrVenture(env, text, type) {
+  const res = await callGroq(env, [{
+    role: 'user',
+    content: `Extract the ${type} details from this message.
+Message: "${text}"
+Return JSON only: {"title": "...", "due": "YYYY-MM-DD or null", "status": "planning|active|done or null", "kpi": "metric or null"}
+If nothing found return: {"title": null}`,
+  }]);
+  try {
+    const raw = res.choices[0].message.content.replace(/```json|```/g, '').trim();
+    return JSON.parse(raw);
+  } catch {
+    return { title: null };
+  }
+}
+
+// ── Reminders ─────────────────────────────────────
+async function extractReminder(env, text) {
+  const now = new Date();
+  const res = await callGroq(env, [{
+    role: 'user',
+    content: `Extract the reminder from this message. Current datetime: ${now.toISOString()} (user is in IST = UTC+5:30).
+Message: "${text}"
+Return JSON only: {"text": "what to remind about", "remind_at": "ISO datetime in UTC"}
+If no clear reminder intent, return: {"text": null, "remind_at": null}`,
+  }]);
+  try {
+    const raw = res.choices[0].message.content.replace(/```json|```/g, '').trim();
+    return JSON.parse(raw);
+  } catch {
+    return { text: null, remind_at: null };
+  }
+}
+
+async function handleReminderCheck(env) {
+  try {
+    const chatId = env.TELEGRAM_ALLOWED_ID;
+    if (!chatId || !env.TELEGRAM_BOT_TOKEN) return;
+
+    const now = new Date().toISOString();
+    const res = await sb(env, `reminders?fired=eq.false&remind_at=lte.${now}`, {
+      headers: { 'Prefer': 'return=representation' },
+    });
+    if (!res.ok) return;
+    const due = await res.json();
+    if (!due.length) return;
+
+    for (const r of due) {
+      await tgSend(env, chatId, `⏰ *Reminder*\n\n${r.text}`);
+      if (r.recurring) {
+        // Reschedule for same time tomorrow
+        const next = new Date(r.remind_at);
+        next.setDate(next.getDate() + 1);
+        await sb(env, `reminders?id=eq.${r.id}`, { method: 'PATCH', body: JSON.stringify({ fired: false, remind_at: next.toISOString() }) });
+      } else {
+        await sb(env, `reminders?id=eq.${r.id}`, { method: 'PATCH', body: JSON.stringify({ fired: true }) });
+      }
+    }
+  } catch (_e) {}
+}
+
+// ── Cron: weekly pattern learning ─────────────────
+async function handleWeeklyPatterns(env, debug = false) {
+  try {
+    const chatId = env.TELEGRAM_ALLOWED_ID;
+    if (!chatId || !env.TELEGRAM_BOT_TOKEN) return debug ? json({ error: 'missing token or chatId' }) : null;
+
+    // Load last 7 days of messages
+    const res = await sb(env, 'messages?order=created_at.desc&limit=200', {
+      headers: { 'Prefer': 'return=representation' },
+    });
+    const messages = res.ok ? await res.json() : [];
+    if (messages.length < 5) return debug ? json({ error: 'not enough messages', count: messages.length }) : null;
+
+    const transcript = messages
+      .reverse()
+      .map(m => `${m.role === 'user' ? 'Umar' : 'NEXUS'}: ${m.content.slice(0, 120)}`)
+      .join('\n');
+
+    // Delete stale pattern facts before inserting fresh ones
+    await sb(env, "facts?tag=eq.pattern", { method: 'DELETE' });
+
+    const analysis = await callGroq(env, [{
+      role: 'system',
+      content: `You are a behavioral analyst. Analyze this week's conversation history between Umar and his AI assistant NEXUS. Extract 5-8 specific, durable behavioral patterns — things Umar repeatedly does, asks about, avoids, or prioritizes. Focus on habits, blind spots, recurring concerns, and neglected areas.
+
+Return JSON only:
+{"patterns": [{"text": "...", "tag": "pattern"}]}
+
+Be specific and honest. Bad example: "Umar talks about business". Good example: "Umar checks Cloud Kitchen daily but hasn't mentioned Poultry Farm in over a week".`,
+    }, {
+      role: 'user',
+      content: `Week's transcript:\n${transcript}`,
+    }]);
+
+    const raw = analysis.choices[0].message.content.replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(raw);
+    const patterns = parsed.patterns || [];
+
+    if (patterns.length) {
+      await saveFacts(env, patterns);
+    }
+
+    // Notify Umar on Telegram
+    const summary = patterns.map((p, i) => `${i + 1}. ${p.text}`).join('\n');
+    await tgSend(env, chatId, `🔍 *WEEKLY PATTERN REPORT*\n━━━━━━━━━━━━━━━━━━━━\n\nHere's what NEXUS noticed this week:\n\n${summary}\n\n_These patterns are now part of your memory and will influence future responses._`);
+    return debug ? json({ ok: true, patterns }) : null;
+  } catch (e) {
+    return debug ? json({ error: e.message }) : null;
+  }
+}
+
+// ── Cron: morning brief ───────────────────────────
+async function handleMorningBrief(env) {
+  try {
+    const chatId = env.TELEGRAM_ALLOWED_ID;
+    if (!chatId || !env.TELEGRAM_BOT_TOKEN) return;
+
+    const now = new Date();
+    const [stateRows, facts, nudgesRes] = await Promise.all([
+      sb(env, 'app_state?id=eq.1', { headers: { 'Prefer': 'return=representation' } }).then(r => r.ok ? r.json() : []),
+      loadFacts(env),
+      sb(env, 'nudges?dismissed=eq.false&order=priority.desc&limit=5', { headers: { 'Prefer': 'return=representation' } }).then(r => r.ok ? r.json() : []),
+    ]);
+
+    const appData = stateRows[0]?.data || {};
+    const ventures  = appData.ventures  || [];
+    const tasks     = appData.tasks     || [];
+    const overdue   = tasks.filter(t => !t.done && t.due && new Date(t.due) < now);
+    const dueToday  = tasks.filter(t => !t.done && t.due && new Date(t.due).toDateString() === now.toDateString());
+
+    const context = [
+      `Date: ${now.toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}`,
+      ventures.length  ? `Ventures: ${ventures.map(v => `${v.name} (${v.status || 'active'})`).join(', ')}` : '',
+      overdue.length   ? `OVERDUE (${overdue.length}): ${overdue.map(t => t.title).join(', ')}` : '',
+      dueToday.length  ? `Due today: ${dueToday.map(t => t.title).join(', ')}` : '',
+      nudgesRes.length ? `Nudges: ${nudgesRes.map(n => n.text).join(' | ')}` : '',
+      facts.length     ? `Key facts: ${facts.slice(0, 10).map(f => f.text).join('. ')}` : '',
+    ].filter(Boolean).join('\n');
+
+    const res = await callGroq(env, [
+      { role: 'system', content: `You are NEXUS. Generate a morning briefing for Umar using Telegram Markdown formatting (single asterisks for *bold*, underscores for _italic_). Structure it EXACTLY like this template — only include sections that have data:
+
+🌅 *NEXUS MORNING BRIEF*
+_Friday, 20 March 2026_
+━━━━━━━━━━━━━━━━━━━━
+
+🏢 *VENTURES*
+• Venture Name — status
+
+⚠️ *OVERDUE* _(urgent)_
+• Task name
+
+📌 *TODAY*
+• Task name
+
+💡 *NUDGES*
+• Nudge text
+
+🧠 *INSIGHT*
+One sharp, personalised observation about Umar's situation.
+
+━━━━━━━━━━━━━━━━━━━━
+Use ₹ for currency. Be specific, not generic. Max 250 words. Output only the message — no extra commentary.` },
+      { role: 'user', content: context },
+    ]);
+
+    await tgSend(env, chatId, res.choices[0].message.content);
+  } catch (_e) {
+    // silent — cron failures must not crash the worker
   }
 }
 
